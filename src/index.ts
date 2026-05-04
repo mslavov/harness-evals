@@ -1,0 +1,15 @@
+export { loadHarnessConfig, writeStarterConfig, type LoadHarnessConfigOptions } from './config/load.js';
+export { runHarness, runTestCase, buildAdapters, type RunHarnessOptions } from './runner/evaluate.js';
+export { buildMatrix } from './runner/matrix.js';
+export { defineAdapter, type AgentAdapter, type AgentPrepareInput, type AgentRunPlan, type AgentEventInput } from './adapters/types.js';
+export { commandAdapter } from './adapters/command.js';
+export { piAdapter } from './adapters/pi.js';
+export { claudeCodeAdapter } from './adapters/claude-code.js';
+export { codexAdapter } from './adapters/codex.js';
+export { cursorAdapter } from './adapters/cursor.js';
+export { builtInAssertions, runAssertions } from './assertions/builtins.js';
+export type { AssertionContext, AssertionResult, AssertionRunner } from './assertions/types.js';
+export type { HarnessConfig, LoadedHarnessConfig, AgentConfig, TestCase, AssertionConfig, MatrixEntry } from './config/schema.js';
+export type { HarnessRunResult, TestRunResult } from './runner/result.js';
+export type { WorkspaceDiff } from './workspace/diff.js';
+export type { AgentEventsSummary, ToolCallSummary } from './events/types.js';
