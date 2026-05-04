@@ -1,6 +1,6 @@
 # Harness Evals Implementation Tasks
 
-This task list turns the target architecture in `docs/HDL.md` and `docs/lld/*.md` into high-level implementation workstreams. It is based on the current `src/` implementation shape: single-prompt test cases, hardcoded built-in adapters, direct file artifact writes, ready-image Docker execution, and built-in assertions. Output providers, scoring, judging, cost accounting, managed images, MCP/CLI mocks, and result visualization are represented as task areas below.
+This task list turns the target architecture in `skills/harness-evals/docs/HDL.md` and `skills/harness-evals/docs/lld/*.md` into high-level implementation workstreams. It is based on the current `src/` implementation shape: single-prompt test cases, hardcoded built-in adapters, direct file artifact writes, ready-image Docker execution, and built-in assertions. Output providers, scoring, judging, cost accounting, managed images, MCP/CLI mocks, and result visualization are represented as task areas below.
 
 ## Dependency graph
 
@@ -38,7 +38,7 @@ T1..T9 ───────> T10 Agent-first skill packaging and onboarding
 | T7 | Implement cost accounting and rollups | T2, T3, T4, T6 | Adapter and judge usage/cost reports are normalized into `step.cost`, `scenario.costSummary`, and run summaries with provider/model/step/test-case/agent rollups. |
 | T8 | Implement deterministic MCP and CLI mocking | T1, T2, T3, T4 | Test cases can declare `mocks.cli` and `mocks.mcp`; wrappers stage deterministic responses, record `mock.config`/`mock.call`, and support assertions over external tool behavior without live services. |
 | T9 | Implement result visualization | T3, T4, T6, T7, T8 | The file output path includes promptfoo-style `results.html`, `results.json`, and `results.csv`; `harness-evals view` opens or serves latest/historical reports. |
-| T10 | Package the agent-first `harness-evals` skill and onboarding flow | T1, T2, T3, T4, T5, T6, T7, T8, T9 | Distributable skill includes `SKILL.md` plus bundled docs and guides agents through install, config, test-case creation, mocks, selected agents, outputs, visualization, judge/scoring defaults, and first-run validation. |
+| T10 | Package the agent-first `harness-evals` skill and onboarding flow | T1, T2, T3, T4, T5, T6, T7, T8, T9 | Distributable skill includes `SKILL.md` plus source docs and guides agents through install, config, test-case creation, mocks, selected agents, outputs, visualization, judge/scoring defaults, and first-run validation. |
 
 ## Task detail
 
@@ -250,13 +250,13 @@ T1..T9 ───────> T10 Agent-first skill packaging and onboarding
 
 **Scope**
 - Add `skills/harness-evals/SKILL.md` with the docs index described in the LLD.
-- Bundle `docs/HDL.md` and `docs/lld/*.md` into the skill distribution.
+- Keep `skills/harness-evals/docs/HDL.md` and `skills/harness-evals/docs/lld/*.md` as the skill-owned source docs.
 - Update package distribution so the Skills CLI can install the skill.
 - Align `harness-evals init` output with the final test-case/config schema.
 - Add starter test case, optional mock fixture, visualization defaults, and validation flow that produces a working first eval.
 
 **Implementation anchors**
-- `docs/*`
+- `skills/harness-evals/docs/*`
 - `package.json`
 - `src/config/load.ts`
 - `src/cli.ts`

@@ -38,9 +38,6 @@ function selectAgents(allAgentNames: string[], testCase: TestCase, cli: CliOverr
 function applyMergeOrder(baseAgent: AgentConfig, testCase: TestCase, agentName: string, cli: CliOverrides): AgentConfig {
   const testBase: Partial<AgentConfig> = {
     timeoutMs: testCase.timeoutMs,
-    args: testCase.args,
-    env: testCase.env,
-    config: testCase.config,
     parser: testCase.parser,
   };
   const wildcard = testCase.agents?.overrides?.['*'];

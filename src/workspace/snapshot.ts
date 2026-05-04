@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isWorkspaceIgnored, normalizeWorkspacePath } from './ignore.js';
 
 export type WorkspaceSnapshot = Record<string, string>;
 
@@ -14,8 +15,8 @@ async function walk(currentDir: string, relativeDir: string, files: WorkspaceSna
   const entries = await readdir(currentDir, { withFileTypes: true });
 
   for (const entry of entries) {
-    const relativePath = normalizePath(relativeDir ? join(relativeDir, entry.name) : entry.name);
-    if (isIgnored(relativePath, ignore)) continue;
+    const relativePath = normalizeWorkspacePath(relativeDir ? join(relativeDir, entry.name) : entry.name);
+    if (isWorkspaceIgnored(relativePath, ignore)) continue;
 
     const absolutePath = join(currentDir, entry.name);
     if (entry.isDirectory()) {
@@ -27,14 +28,3 @@ async function walk(currentDir: string, relativeDir: string, files: WorkspaceSna
   }
 }
 
-function isIgnored(path: string, patterns: readonly string[]): boolean {
-  const parts = normalizePath(path).split('/');
-  return patterns.some((pattern) => {
-    const normalized = normalizePath(pattern).replace(/^\/+|\/+$/g, '');
-    return normalized && !normalized.includes('/') && parts.includes(normalized);
-  });
-}
-
-function normalizePath(path: string): string {
-  return path.split('\\').join('/');
-}

@@ -1,10 +1,26 @@
-import { DEFAULT_HARNESS_CONFIG, type AgentConfig, type DockerConfig, type HarnessConfig, type TestReference, type WorkspaceConfig } from './schema.js';
+import {
+  DEFAULT_HARNESS_CONFIG,
+  type AgentConfig,
+  type DockerConfig,
+  type HarnessConfig,
+  type MockConfig,
+  type OutputConfig,
+  type ProjectScoringConfig,
+  type VisualizationConfig,
+  type WorkspaceConfig,
+} from './schema.js';
 
-export interface HarnessConfigOverride extends Omit<Partial<HarnessConfig>, 'workspace' | 'docker' | 'agents' | 'tests'> {
+type VisualizationConfigOverride = Omit<Partial<VisualizationConfig>, 'include'> & { include?: Partial<VisualizationConfig['include']> };
+
+export interface HarnessConfigOverride extends Omit<Partial<HarnessConfig>, 'workspace' | 'docker' | 'agents' | 'tests' | 'mocks' | 'output' | 'visualization' | 'scoring'> {
   workspace?: Partial<WorkspaceConfig>;
   docker?: Partial<DockerConfig>;
   agents?: Record<string, AgentConfig>;
-  tests?: TestReference[];
+  tests?: string[];
+  mocks?: Partial<MockConfig>;
+  output?: Partial<OutputConfig>;
+  visualization?: VisualizationConfigOverride;
+  scoring?: ProjectScoringConfig;
 }
 
 export function mergeHarnessConfig(base: HarnessConfig, override: HarnessConfigOverride): HarnessConfig {
@@ -14,7 +30,12 @@ export function mergeHarnessConfig(base: HarnessConfig, override: HarnessConfigO
     workspace: mergeWorkspaceConfig(base.workspace, override.workspace),
     docker: mergeDockerConfig(base.docker, override.docker),
     agents: mergeRecord(base.agents, override.agents),
-    tests: override.tests ?? base.tests,
+    tests: override.tests ? [...override.tests] : [...base.tests],
+    adapters: mergeRecord(base.adapters, override.adapters),
+    mocks: mergeMockConfig(base.mocks, override.mocks),
+    output: mergeOutputConfig(base.output, override.output),
+    visualization: mergeVisualizationConfig(base.visualization, override.visualization),
+    scoring: mergeScoringConfig(base.scoring, override.scoring),
   };
 }
 
@@ -27,7 +48,7 @@ export function mergeWorkspaceConfig(base: WorkspaceConfig, override?: Partial<W
   return {
     ...base,
     ...definedObject(override),
-    ignore: override.ignore ?? base.ignore,
+    ignore: override.ignore ? [...override.ignore] : [...base.ignore],
   };
 }
 
@@ -36,7 +57,7 @@ export function mergeDockerConfig(base: DockerConfig, override?: Partial<DockerC
   return {
     ...base,
     ...definedObject(override),
-    envAllowlist: override.envAllowlist ?? base.envAllowlist,
+    envAllowlist: override.envAllowlist ? [...override.envAllowlist] : [...base.envAllowlist],
   };
 }
 
@@ -80,6 +101,38 @@ export function resolveAgentExtends(agents: Record<string, AgentConfig>): Record
   return resolved;
 }
 
+function mergeMockConfig(base: MockConfig, override?: Partial<MockConfig>): MockConfig {
+  return { ...base, ...definedObject(override) };
+}
+
+function mergeOutputConfig(base: OutputConfig, override?: Partial<OutputConfig>): OutputConfig {
+  return {
+    providers: override?.providers ? [...override.providers] : [...base.providers],
+  };
+}
+
+function mergeVisualizationConfig(
+  base: VisualizationConfig,
+  override?: VisualizationConfigOverride,
+): VisualizationConfig {
+  if (!override) return cloneVisualizationConfig(base);
+  return {
+    ...base,
+    ...definedObject(override),
+    formats: override.formats ? [...override.formats] : [...base.formats],
+    include: { ...base.include, ...(override.include ?? {}) },
+  };
+}
+
+function mergeScoringConfig(base: ProjectScoringConfig, override?: ProjectScoringConfig): ProjectScoringConfig {
+  if (!override) return cloneScoringConfig(base);
+  const merged: ProjectScoringConfig = cloneScoringConfig(base);
+  for (const key of Object.keys(override) as Array<keyof ProjectScoringConfig>) {
+    merged[key] = { ...(base[key] ?? {}), ...(override[key] ?? {}) } as ProjectScoringConfig[typeof key];
+  }
+  return merged;
+}
+
 function mergeRecord<T>(base: Record<string, T>, override?: Record<string, T>): Record<string, T> {
   return { ...base, ...(override ?? {}) };
 }
@@ -102,6 +155,18 @@ function cloneAgentConfig(agent: AgentConfig): AgentConfig {
     userConfigDirs: agent.userConfigDirs ? [...agent.userConfigDirs] : undefined,
     config: agent.config ? { ...agent.config } : undefined,
   };
+}
+
+function cloneVisualizationConfig(config: VisualizationConfig): VisualizationConfig {
+  return {
+    ...config,
+    formats: [...config.formats],
+    include: { ...config.include },
+  };
+}
+
+function cloneScoringConfig(config: ProjectScoringConfig): ProjectScoringConfig {
+  return Object.fromEntries(Object.entries(config).map(([key, value]) => [key, value ? { ...value } : value])) as ProjectScoringConfig;
 }
 
 function definedObject<T extends object>(value: T | undefined): Partial<T> {

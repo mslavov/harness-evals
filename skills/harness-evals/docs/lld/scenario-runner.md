@@ -155,14 +155,34 @@ interface ScenarioStepResult {
 The runner passes test case, step identity, and prior continuation metadata to the adapter. The adapter returns a run plan plus updated continuation metadata when it needs state for the next step. The continuation object is opaque to the runner.
 
 ```ts
-interface AgentStepPrepareInput extends AgentPrepareInput {
+interface AgentStepPrepareInput {
+  projectRoot: string;
+  agentName: string;
+  agent: AgentConfig;
   testCase: TestCaseDefinition;
   step: TestCaseStepDefinition;
   stepIndex: number;
+  prompt: string;
+  runDir: string;
+  stepDir: string;
+  workspaceDir: string;
+  configDir: string;
+  workspace: WorkspaceConfig;
+  docker: DockerConfig;
+  mocks?: MockRuntimePlan;
   continuation?: AdapterContinuation;
 }
 
-interface AgentStepRunPlan extends AgentRunPlan {
+interface AgentStepRunPlan {
+  argv: string[];
+  cwd: string;
+  envNames: string[];
+  envValues?: Record<string, string>;
+  configMounts: ConfigMount[];
+  parser: string;
+  metadata?: Record<string, unknown>;
+  cleanupPaths?: string[];
+  timeoutMs?: number;
   continuation?: AdapterContinuation;
 }
 

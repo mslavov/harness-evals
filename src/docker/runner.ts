@@ -1,8 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { ConfigMount } from '../adapters/types.js';
-import { redactJson, redactString, type Redaction } from '../redaction.js';
 import { buildDockerArgs } from './args.js';
 
 export interface DockerRunOptions {
@@ -17,33 +14,39 @@ export interface DockerRunOptions {
   envNames: string[];
   envValues?: Record<string, string>;
   configMounts: ConfigMount[];
-  runDir: string;
   caseId: string;
   agentName: string;
   timeoutMs: number;
-  redactions: readonly Redaction[];
+}
+
+export interface DockerCommandMetadata {
+  command: string[];
+  image: string;
+  containerName: string;
+  argv: string[];
+  env: Record<string, string | null>;
+  mounts: {
+    workspace: { source: string; target: string; readonly: boolean };
+    config: { source: string; target: string; readonly: boolean };
+    extra: ConfigMount[];
+  };
+  timeoutMs: number;
 }
 
 export interface DockerRunResult {
   image: string;
   command: string[];
   argv: string[];
+  commandMetadata: DockerCommandMetadata;
   stdout: string;
   stderr: string;
-  stdoutPath: string;
-  stderrPath: string;
-  commandPath: string;
   exitCode: number | null;
   durationMs: number;
+  timedOut: boolean;
   errorMessage?: string;
 }
 
 export async function runInDocker(options: DockerRunOptions): Promise<DockerRunResult> {
-  await mkdir(options.runDir, { recursive: true });
-
-  const stdoutPath = join(options.runDir, 'stdout.log');
-  const stderrPath = join(options.runDir, 'stderr.log');
-  const commandPath = join(options.runDir, 'command.redacted.json');
   const containerName = buildContainerName(options.caseId, options.agentName);
   const dockerArgs = buildDockerArgs({
     image: options.image,
@@ -58,26 +61,22 @@ export async function runInDocker(options: DockerRunOptions): Promise<DockerRunR
     argv: options.argv,
   });
   const command = ['docker', ...dockerArgs];
-
-  await writeFile(
-    commandPath,
-    `${JSON.stringify(redactJson({
-      command,
-      image: options.image,
-      containerName,
-      argv: options.argv,
-      env: {
-        ...(options.envValues ?? {}),
-        ...Object.fromEntries(options.envNames.map((name) => [name, process.env[name] ?? null])),
-      },
-      mounts: {
-        workspace: { source: options.workspaceDir, target: options.workspaceTarget, readonly: false },
-        config: { source: options.configDir, target: options.configTarget, readonly: false },
-        extra: options.configMounts,
-      },
-      timeoutMs: options.timeoutMs,
-    }, options.redactions), null, 2)}\n`,
-  );
+  const commandMetadata: DockerCommandMetadata = {
+    command,
+    image: options.image,
+    containerName,
+    argv: options.argv,
+    env: {
+      ...(options.envValues ?? {}),
+      ...Object.fromEntries(options.envNames.map((name) => [name, process.env[name] ?? null])),
+    },
+    mounts: {
+      workspace: { source: options.workspaceDir, target: options.workspaceTarget, readonly: false },
+      config: { source: options.configDir, target: options.configTarget, readonly: false },
+      extra: options.configMounts,
+    },
+    timeoutMs: options.timeoutMs,
+  };
 
   const startedAt = Date.now();
   const child = spawn('docker', dockerArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
@@ -111,20 +110,16 @@ export async function runInDocker(options: DockerRunOptions): Promise<DockerRunR
     stderr += `${stderr ? '\n' : ''}${errorMessage}\n`;
   }
 
-  await writeFile(stdoutPath, redactString(stdout, options.redactions));
-  await writeFile(stderrPath, redactString(stderr, options.redactions));
-
   return {
     image: options.image,
-    command: redactJson(command, options.redactions),
-    argv: redactJson(options.argv, options.redactions),
+    command,
+    argv: options.argv,
+    commandMetadata,
     stdout,
     stderr,
-    stdoutPath,
-    stderrPath,
-    commandPath,
     exitCode,
     durationMs: Date.now() - startedAt,
+    timedOut,
     errorMessage,
   };
 }

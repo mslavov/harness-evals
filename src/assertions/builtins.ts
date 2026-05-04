@@ -1,126 +1,179 @@
-import type { AssertionConfig } from '../config/schema.js';
-import type { AssertionContext, AssertionResult, AssertionRunner } from './types.js';
+import type { AssertionConfig, JudgeInputRef, LlmJudgeAssertionConfig } from '../config/schema.js';
+import { defaultJudgeRunner } from '../judge/default.js';
+import type { JudgeRecord, JudgeRequest, JudgeResult } from '../judge/types.js';
+import { redactJson, redactString } from '../redaction.js';
+import type { AssertionContext, AssertionResult, AssertionRunner, AssertionRunOptions } from './types.js';
 
 export const builtInAssertions: Record<string, AssertionRunner> = {
   exitCode,
   contains,
   notContains,
   toolCalled,
+  mockCalled,
   noToolErrors,
   workspaceDiff,
   settingsDrivenSetup,
-  piExitedSuccessfully: exitCode,
 };
 
-export async function runAssertions(configs: AssertionConfig[], context: AssertionContext): Promise<AssertionResult[]> {
-  const results: AssertionResult[] = [];
-  for (const config of configs) {
+export async function runAssertions(configs: AssertionConfig[], context: AssertionContext, options: AssertionRunOptions = {}): Promise<AssertionResult[]> {
+  const resultsByConfig = new Map<AssertionConfig, AssertionResult>();
+  const nonJudgeConfigs = configs.filter((config) => config.type !== 'llmJudge');
+  const judgeConfigs = configs.filter(isLlmJudgeConfig);
+  const completed: AssertionResult[] = [];
+
+  for (const config of nonJudgeConfigs) {
     const runner = builtInAssertions[config.type];
-    if (!runner) {
-      results.push({ type: config.type, pass: false, reason: `Unknown assertion type: ${config.type}`, required: readRequired(config) });
-      continue;
-    }
-    results.push(await runner(config, context));
+    const result = runner
+      ? await runner(config, context)
+      : assertionResult(config, false, `Unknown assertion type: ${config.type}`);
+    resultsByConfig.set(config, result);
+    completed.push(result);
   }
-  return results;
+
+  for (const config of judgeConfigs) {
+    const result = await llmJudge(config, { ...context, assertions: [...completed] }, options);
+    resultsByConfig.set(config, result);
+    completed.push(result);
+  }
+
+  return configs.map((config) => resultsByConfig.get(config) ?? assertionResult(config, false, `Assertion was not evaluated: ${config.type}`));
 }
 
 function exitCode(config: AssertionConfig, context: AssertionContext): AssertionResult {
   const expected = readNumber(config.equals, 0);
   const pass = context.exitCode === expected;
-  return {
-    type: config.type,
+  return assertionResult(
+    config,
     pass,
-    reason: pass ? `Exit code was ${expected}` : `Expected exit code ${expected}, got ${String(context.exitCode)}`,
-    required: readRequired(config),
-  };
+    pass ? `Exit code was ${expected}` : `Expected exit code ${expected}, got ${String(context.exitCode)}`,
+    { expected, actual: context.exitCode },
+  );
 }
 
 function contains(config: AssertionConfig, context: AssertionContext): AssertionResult {
   const value = readString(config.value);
   const pass = value ? context.output.includes(value) : false;
-  return {
-    type: config.type,
+  return assertionResult(
+    config,
     pass,
-    reason: pass ? `Output contained ${JSON.stringify(value)}` : `Output did not contain ${JSON.stringify(value)}`,
-    required: readRequired(config),
-  };
+    pass ? `Output contained ${JSON.stringify(value)}` : `Output did not contain ${JSON.stringify(value)}`,
+    { value },
+  );
 }
 
 function notContains(config: AssertionConfig, context: AssertionContext): AssertionResult {
   const value = readString(config.value);
   const pass = value ? !context.output.includes(value) : false;
-  return {
-    type: config.type,
+  return assertionResult(
+    config,
     pass,
-    reason: pass ? `Output did not contain ${JSON.stringify(value)}` : `Output contained ${JSON.stringify(value)}`,
-    required: readRequired(config),
-  };
+    pass ? `Output did not contain ${JSON.stringify(value)}` : `Output contained ${JSON.stringify(value)}`,
+    { value },
+  );
 }
 
 function toolCalled(config: AssertionConfig, context: AssertionContext): AssertionResult {
   const name = readString(config.name);
-  if (!name) return { type: config.type, pass: false, reason: 'toolCalled requires name', required: readRequired(config) };
+  if (!name) return assertionResult(config, false, 'toolCalled requires name');
 
   const min = readNumber(config.min, 1);
   const max = typeof config.max === 'number' ? config.max : undefined;
   const matching = context.events.toolCalls.filter((call) => matchesToolName(call.name, name));
+  const metadata = { name, min, max, count: matching.length };
 
   if (matching.length < min) {
-    return { type: config.type, pass: false, reason: `Expected ${name} at least ${min} time(s), got ${matching.length}`, required: readRequired(config) };
+    return assertionResult(config, false, `Expected ${name} at least ${min} time(s), got ${matching.length}`, metadata);
   }
   if (max !== undefined && matching.length > max) {
-    return { type: config.type, pass: false, reason: `Expected ${name} at most ${max} time(s), got ${matching.length}`, required: readRequired(config) };
+    return assertionResult(config, false, `Expected ${name} at most ${max} time(s), got ${matching.length}`, metadata);
   }
 
   const argsContain = readStringArray(config.argsContain);
   const serializedArgs = matching.map((call) => JSON.stringify(call.args ?? null)).join('\n');
   const missing = argsContain.filter((needle) => !serializedArgs.includes(needle));
   if (missing.length > 0) {
-    return { type: config.type, pass: false, reason: `Tool ${name} args did not contain: ${missing.join(', ')}`, required: readRequired(config) };
+    return assertionResult(config, false, `Tool ${name} args did not contain: ${missing.join(', ')}`, { ...metadata, missing });
   }
 
-  return { type: config.type, pass: true, reason: `Tool ${name} was called ${matching.length} time(s)`, required: readRequired(config) };
+  return assertionResult(config, true, `Tool ${name} was called ${matching.length} time(s)`, metadata);
+}
+
+function mockCalled(config: AssertionConfig, context: AssertionContext): AssertionResult {
+  const name = readString(config.name);
+  if (!name) return assertionResult(config, false, 'mockCalled requires name');
+
+  const surface = readString(config.surface);
+  const min = readNumber(config.min, 1);
+  const max = typeof config.max === 'number' ? config.max : undefined;
+  const expectedMatched = typeof config.matched === 'boolean' ? config.matched : undefined;
+  const calls = context.mockCalls ?? context.events.mockCalls ?? [];
+  const matching = calls.filter((call) => {
+    if (surface && call.surface !== surface) return false;
+    if (expectedMatched !== undefined && call.matched !== expectedMatched) return false;
+    return matchesToolName(call.name, name);
+  });
+  const metadata = { name, surface, min, max, matched: expectedMatched, count: matching.length };
+
+  if (matching.length < min) {
+    return assertionResult(config, false, `Expected mock ${name} at least ${min} time(s), got ${matching.length}`, metadata);
+  }
+  if (max !== undefined && matching.length > max) {
+    return assertionResult(config, false, `Expected mock ${name} at most ${max} time(s), got ${matching.length}`, metadata);
+  }
+
+  const argsContain = readStringArray(config.argsContain);
+  const serializedArgs = matching.map((call) => JSON.stringify(call.args ?? null)).join('\n');
+  const missing = argsContain.filter((needle) => !serializedArgs.includes(needle));
+  if (missing.length > 0) {
+    return assertionResult(config, false, `Mock ${name} args did not contain: ${missing.join(', ')}`, { ...metadata, missing });
+  }
+
+  return assertionResult(config, true, `Mock ${name} was called ${matching.length} time(s)`, metadata);
 }
 
 function noToolErrors(config: AssertionConfig, context: AssertionContext): AssertionResult {
   const failures = context.events.toolCalls.filter((call) => call.isError === true);
   if (failures.length > 0) {
-    return {
-      type: config.type,
-      pass: false,
-      reason: `Tool errors recorded: ${failures.map((call) => call.name).join(', ')}`,
-      required: readRequired(config),
-    };
+    return assertionResult(config, false, `Tool errors recorded: ${failures.map((call) => call.name).join(', ')}`, { failures });
   }
-  return { type: config.type, pass: true, reason: 'No tool errors recorded', required: readRequired(config) };
+  return assertionResult(config, true, 'No tool errors recorded', { failures: [] });
 }
 
 function workspaceDiff(config: AssertionConfig, context: AssertionContext): AssertionResult {
   const added = [...context.workspace.added].sort();
   const changed = [...context.workspace.changed].sort();
   const deleted = [...context.workspace.deleted].sort();
+  const actual = [...added, ...changed, ...deleted].sort();
 
   const changedFiles = readStringArray(config.changedFiles, true);
   if (changedFiles) {
-    const actual = [...added, ...changed, ...deleted].sort();
     const expected = [...changedFiles].sort();
     if (!sameArray(actual, expected)) {
-      return { type: config.type, pass: false, reason: `Expected workspace diff ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`, required: readRequired(config) };
+      return assertionResult(config, false, `Expected workspace diff ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`, { expected, actual });
     }
   }
 
   const addedFiles = readStringArray(config.addedFiles, true);
   if (addedFiles && !sameArray(added, addedFiles)) {
-    return { type: config.type, pass: false, reason: `Expected added files ${JSON.stringify(addedFiles)}, got ${JSON.stringify(added)}`, required: readRequired(config) };
+    return assertionResult(config, false, `Expected added files ${JSON.stringify(addedFiles)}, got ${JSON.stringify(added)}`, { expected: addedFiles, actual: added });
   }
 
   const deletedFiles = readStringArray(config.deletedFiles, true);
   if (deletedFiles && !sameArray(deleted, deletedFiles)) {
-    return { type: config.type, pass: false, reason: `Expected deleted files ${JSON.stringify(deletedFiles)}, got ${JSON.stringify(deleted)}`, required: readRequired(config) };
+    return assertionResult(config, false, `Expected deleted files ${JSON.stringify(deletedFiles)}, got ${JSON.stringify(deleted)}`, { expected: deletedFiles, actual: deleted });
   }
 
-  return { type: config.type, pass: true, reason: 'Workspace diff matched expectations', required: readRequired(config) };
+  const minChanged = readOptionalNumber(config.minChanged);
+  if (minChanged !== undefined && actual.length < minChanged) {
+    return assertionResult(config, false, `Expected at least ${minChanged} changed file(s), got ${actual.length}`, { minChanged, actual });
+  }
+
+  const maxChanged = readOptionalNumber(config.maxChanged);
+  if (maxChanged !== undefined && actual.length > maxChanged) {
+    return assertionResult(config, false, `Expected at most ${maxChanged} changed file(s), got ${actual.length}`, { maxChanged, actual });
+  }
+
+  return assertionResult(config, true, 'Workspace diff matched expectations', { added, changed, deleted });
 }
 
 function settingsDrivenSetup(config: AssertionConfig, context: AssertionContext): AssertionResult {
@@ -131,14 +184,190 @@ function settingsDrivenSetup(config: AssertionConfig, context: AssertionContext)
   const argv = readStringArray(readRecord(context.metadata.agent)?.argv);
 
   if (templates.length === 0 && sources.length === 0 && !hasGeneratedSettings) {
-    return { type: config.type, pass: false, reason: 'No generated settings source was recorded', required: readRequired(config) };
+    return assertionResult(config, false, 'No generated settings source was recorded', { templates, sources, hasGeneratedSettings });
   }
 
   if (argv.includes('-e') || argv.includes('--no-extensions')) {
-    return { type: config.type, pass: false, reason: 'Agent command used explicit -e or --no-extensions', required: readRequired(config) };
+    return assertionResult(config, false, 'Agent command used explicit -e or --no-extensions', { argv });
   }
 
-  return { type: config.type, pass: true, reason: 'Setup was settings-driven', required: readRequired(config) };
+  return assertionResult(config, true, 'Setup was settings-driven', { templates, sources, hasGeneratedSettings });
+}
+
+async function llmJudge(config: LlmJudgeAssertionConfig, context: AssertionContext, options: AssertionRunOptions): Promise<AssertionResult> {
+  const resolved = resolveJudgeRequest(config, context, options);
+  if (!resolved.ok) {
+    const record = judgeRecord(config, false, resolved.reason, { error: resolved.reason });
+    await options.onJudgeRecord?.(record);
+    return assertionResult(config, false, resolved.reason, { error: resolved.reason }, undefined, config.threshold);
+  }
+
+  try {
+    const runner = options.judgeRunner ?? defaultJudgeRunner;
+    const judgeResult = validateJudgeResult(await runner(resolved.request));
+    const pass = judgeResult.score >= config.threshold && judgeResult.pass !== false;
+    const reason = judgeResult.pass === false && judgeResult.score >= config.threshold
+      ? `Judge explicitly failed: ${judgeResult.reason}`
+      : judgeResult.reason;
+    const metadata = buildJudgeAssertionMetadata(resolved.request, judgeResult.metadata);
+    await options.onJudgeRecord?.({
+      id: config.id,
+      assertionId: config.id,
+      type: 'llmJudge',
+      provider: resolved.request.provider,
+      model: resolved.request.model,
+      threshold: config.threshold,
+      score: judgeResult.score,
+      pass,
+      reason,
+      prompt: resolved.request.prompt,
+      inputs: resolved.request.inputs,
+      metadata,
+    });
+    return assertionResult(config, pass, reason, metadata, judgeResult.score, config.threshold);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await options.onJudgeRecord?.({
+      id: config.id,
+      assertionId: config.id,
+      type: 'llmJudge',
+      provider: resolved.request.provider,
+      model: resolved.request.model,
+      threshold: config.threshold,
+      pass: false,
+      reason,
+      prompt: resolved.request.prompt,
+      inputs: resolved.request.inputs,
+      error: reason,
+    });
+    return assertionResult(config, false, reason, { provider: resolved.request.provider, model: resolved.request.model, error: reason }, undefined, config.threshold);
+  }
+}
+
+function resolveJudgeRequest(
+  config: LlmJudgeAssertionConfig,
+  context: AssertionContext,
+  options: AssertionRunOptions,
+): { ok: true; request: JudgeRequest } | { ok: false; reason: string } {
+  const provider = config.judge.provider ?? options.judgeDefaults?.provider;
+  const model = config.judge.model ?? options.judgeDefaults?.model;
+  const apiKeyEnv = config.judge.apiKeyEnv ?? options.judgeDefaults?.apiKeyEnv;
+  if (!provider) return { ok: false, reason: 'llmJudge requires judge.provider or top-level judge.provider' };
+  if (!model) return { ok: false, reason: 'llmJudge requires judge.model or top-level judge.model' };
+  if (!apiKeyEnv) return { ok: false, reason: 'llmJudge requires judge.apiKeyEnv or top-level judge.apiKeyEnv' };
+
+  const inputs = redactJson(buildJudgeInputs(config.judge.inputs, context), options.redactions ?? []) as Partial<Record<JudgeInputRef, unknown>>;
+  const prompt = redactString(buildJudgePrompt(config, inputs, config.judge.promptTemplate ?? options.judgeDefaults?.promptTemplate), options.redactions ?? []);
+  return {
+    ok: true,
+    request: {
+      assertionId: config.id,
+      provider,
+      model,
+      apiKeyEnv,
+      temperature: config.judge.temperature ?? options.judgeDefaults?.temperature,
+      rubric: config.judge.rubric,
+      threshold: config.threshold,
+      inputs,
+      prompt,
+    },
+  };
+}
+
+function buildJudgeInputs(refs: JudgeInputRef[], context: AssertionContext): Partial<Record<JudgeInputRef, unknown>> {
+  const inputs: Partial<Record<JudgeInputRef, unknown>> = {};
+  for (const ref of refs) {
+    switch (ref) {
+      case 'finalOutput':
+        inputs.finalOutput = context.output;
+        break;
+      case 'stdout':
+        inputs.stdout = context.stdout ?? '';
+        break;
+      case 'stderr':
+        inputs.stderr = context.stderr ?? '';
+        break;
+      case 'events':
+        inputs.events = context.events;
+        break;
+      case 'toolCalls':
+        inputs.toolCalls = context.events.toolCalls;
+        break;
+      case 'mockCalls':
+        inputs.mockCalls = context.mockCalls ?? context.events.mockCalls ?? [];
+        break;
+      case 'assertions':
+        inputs.assertions = context.assertions ?? [];
+        break;
+      case 'workspaceDiff':
+        inputs.workspaceDiff = context.workspace;
+        break;
+      case 'cost':
+        inputs.cost = context.events.cost;
+        break;
+    }
+  }
+  return inputs;
+}
+
+function buildJudgePrompt(config: LlmJudgeAssertionConfig, inputs: Partial<Record<JudgeInputRef, unknown>>, template?: string): string {
+  const inputJson = JSON.stringify(inputs, null, 2);
+  if (template) {
+    return template
+      .replaceAll('{{rubric}}', config.judge.rubric)
+      .replaceAll('{{inputs}}', inputJson)
+      .replaceAll('{rubric}', config.judge.rubric)
+      .replaceAll('{inputs}', inputJson);
+  }
+
+  return `Evaluate the agent result using this rubric:\n${config.judge.rubric}\n\nInputs:\n${inputJson}\n\nReturn only JSON with this shape: {"score": number between 0 and 1, "pass": optional boolean, "reason": string, "metadata": optional object}.`;
+}
+
+function validateJudgeResult(result: JudgeResult): JudgeResult {
+  if (typeof result.score !== 'number' || !Number.isFinite(result.score)) throw new Error('Judge result score must be a number');
+  if (result.score < 0 || result.score > 1) throw new Error('Judge result score must be between 0 and 1');
+  if (typeof result.reason !== 'string' || !result.reason.trim()) throw new Error('Judge result reason must be a non-empty string');
+  if (result.pass !== undefined && typeof result.pass !== 'boolean') throw new Error('Judge result pass must be a boolean when provided');
+  if (result.metadata !== undefined && !isRecord(result.metadata)) throw new Error('Judge result metadata must be an object when provided');
+  return result;
+}
+
+function buildJudgeAssertionMetadata(request: JudgeRequest, judgeMetadata: Record<string, unknown> | undefined): Record<string, unknown> {
+  const usage = readRecord(judgeMetadata?.usage);
+  const cost = readRecord(judgeMetadata?.cost);
+  return {
+    provider: request.provider,
+    model: request.model,
+    usage,
+    cost,
+    judge: judgeMetadata,
+  };
+}
+
+function judgeRecord(config: LlmJudgeAssertionConfig, pass: boolean, reason: string, metadata?: Record<string, unknown>): JudgeRecord {
+  return {
+    id: config.id,
+    assertionId: config.id,
+    type: 'llmJudge',
+    threshold: config.threshold,
+    pass,
+    reason,
+    metadata,
+    error: pass ? undefined : reason,
+  };
+}
+
+function assertionResult(config: AssertionConfig, pass: boolean, reason: string, metadata?: Record<string, unknown>, score = pass ? 1 : 0, threshold?: number): AssertionResult {
+  return {
+    id: typeof config.id === 'string' ? config.id : undefined,
+    type: config.type,
+    pass,
+    required: readRequired(config),
+    score,
+    threshold,
+    reason,
+    metadata,
+  };
 }
 
 function readRequired(config: AssertionConfig): boolean {
@@ -154,6 +383,10 @@ function readNumber(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function readOptionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function readStringArray(value: unknown, preserveUndefined?: false): string[];
 function readStringArray(value: unknown, preserveUndefined: true): string[] | undefined;
 function readStringArray(value: unknown, preserveUndefined = false): string[] | undefined {
@@ -164,6 +397,14 @@ function readStringArray(value: unknown, preserveUndefined = false): string[] | 
 
 function readRecord(value: unknown): Record<string, unknown> | undefined {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isLlmJudgeConfig(config: AssertionConfig): config is LlmJudgeAssertionConfig {
+  return config.type === 'llmJudge';
 }
 
 function matchesToolName(actual: string, expected: string): boolean {

@@ -45,7 +45,7 @@ Provider fields:
 | --- | --- | --- |
 | `type` | yes | Built-in provider type or custom provider name. |
 | `module` | for custom providers | Project-relative path or package specifier exporting the provider. |
-| `export` | no | Named export to read from the module. Defaults to `default`, then `provider`. |
+| `export` | no | Named export to read from the module. Defaults to `default`, then `createProvider`, then `provider`. |
 | `config` | no | Provider-specific config passed through without harness interpretation. |
 
 ### Output provider contract
@@ -65,6 +65,8 @@ interface OutputProvider {
   writeBlob?(blob: OutputBlob): Promise<OutputBlobRef>;
   finalize(result: OutputFinalizeInput): Promise<void>;
 }
+
+type OutputProviderFactory = () => OutputProvider;
 
 interface OutputProviderInitializeInput {
   projectRoot: string;
@@ -163,6 +165,8 @@ The built-in file provider maps output records to the filesystem layout:
 
 Non-file providers receive the same records and choose their own storage layout.
 
+Custom provider modules may export either an `OutputProvider` object or a synchronous `OutputProviderFactory`. Factory exports are called for each `registry.create()` run, so state held in the returned provider is isolated per run. Object exports are shallow-cloned per run; they should be stateless or initialize per-run state on `this` during `initialize`. Module-level variables and closure-captured values are shared across runs, so stateful providers should prefer `createProvider` or another configured factory export.
+
 ## 3. Lifecycle / State Transitions
 
 ### Provider lifecycle
@@ -203,8 +207,10 @@ The dispatcher waits for provider writes before considering a step or run record
 
 1. Read `output.providers` from `harness-evals.yaml`.
 2. Load custom output provider modules when `module` is set.
-3. Read provider-specific config and pass it to `initialize`.
-4. Read in-memory output records from the runner and subsystems.
+3. Resolve the configured provider export as either an object provider or provider factory.
+4. Create an isolated provider instance for each `registry.create()` call.
+5. Read provider-specific config and pass it to `initialize`.
+6. Read in-memory output records from the runner and subsystems.
 
 ### Write path
 
@@ -244,6 +250,7 @@ The dispatcher waits for provider writes before considering a step or run record
 - Users can configure a list of output providers.
 - Each configured provider receives the same normalized output records.
 - Custom output providers can be loaded from project-relative modules or package specifiers.
+- Custom output provider factories create isolated provider instances per run.
 - Output provider config is passed through without harness interpretation.
 
 ### Open decisions

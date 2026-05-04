@@ -1,8 +1,8 @@
-import { defineAdapter, type AgentAdapter, type AgentEventInput, type AgentPrepareInput, type AgentRunPlan } from './types.js';
+import { type AgentAdapter, type AgentEventInput, type AgentStepPrepareInput, type AgentStepRunPlan } from './types.js';
 
-export const commandAdapter: AgentAdapter = defineAdapter({
+export const commandAdapter: AgentAdapter = {
   name: 'command',
-  async prepareRun(input: AgentPrepareInput): Promise<AgentRunPlan> {
+  async prepareStep(input: AgentStepPrepareInput): Promise<AgentStepRunPlan> {
     if (!input.agent.command) throw new Error(`Agent ${input.agentName} requires command`);
     const args = renderArgs(input.agent.args ?? [], input.prompt);
     const argv = [input.agent.command, ...args];
@@ -24,7 +24,7 @@ export const commandAdapter: AgentAdapter = defineAdapter({
       errors: input.stderr.trim() ? [input.stderr.trim()] : [],
     };
   },
-});
+};
 
 function renderArgs(args: readonly string[], prompt: string): string[] {
   return args.map((arg) => arg.replace(/\{\{\s*prompt\s*}}/g, prompt));

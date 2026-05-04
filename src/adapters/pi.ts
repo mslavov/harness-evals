@@ -1,9 +1,9 @@
 import { access, chmod, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { parsePiEvents } from '../events/pi.js';
 import { expandTrustedPath, resolveProjectPath, resolveTrustedPath } from '../config/paths.js';
-import { defineAdapter, type AgentAdapter, type AgentPrepareInput, type AgentRunPlan } from './types.js';
+import type { AgentEventsSummary, ToolCallSummary } from '../events/types.js';
+import { type AgentAdapter, type AgentStepPrepareInput, type AgentStepRunPlan } from './types.js';
 
 interface PiSelection {
   provider?: string;
@@ -30,9 +30,16 @@ const RESOURCE_FIELDS = new Set(['extensions', 'skills', 'prompts', 'themes']);
 const NON_LOCAL_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https:', 'ssh:'];
 const SECRET_CONFIG_FILES = ['auth.json', 'models.json', 'model-tiers.json'];
 
-export const piAdapter: AgentAdapter = defineAdapter({
+export const piAdapter: AgentAdapter = {
   name: 'pi',
-  async prepareRun(input: AgentPrepareInput): Promise<AgentRunPlan> {
+  getInstallRecipe(input) {
+    return Promise.resolve({
+      commands: ['npm install -g @mariozechner/pi-coding-agent'],
+      probes: [{ command: [input.agent.command ?? 'pi', '--version'] }],
+      cacheKey: '@mariozechner/pi-coding-agent',
+    });
+  },
+  async prepareStep(input: AgentStepPrepareInput): Promise<AgentStepRunPlan> {
     await mkdir(input.configDir, { recursive: true });
 
     const config = input.agent.config ?? {};
@@ -78,7 +85,130 @@ export const piAdapter: AgentAdapter = defineAdapter({
   async parseEvents(input) {
     return parsePiEvents(input.stdout);
   },
-});
+};
+
+interface MutableToolCall extends ToolCallSummary {
+  id?: string;
+}
+
+function parsePiEvents(stdout: string): AgentEventsSummary {
+  const errors: string[] = [];
+  const toolCalls: MutableToolCall[] = [];
+  const toolCallsById = new Map<string, MutableToolCall>();
+  let finalOutput = '';
+
+  const lines = stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  for (const [index, line] of lines.entries()) {
+    let event: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (!isRecord(parsed)) continue;
+      event = parsed;
+    } catch (error) {
+      errors.push(`Line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+
+    const type = event.type;
+    if (type === 'tool_execution_start') {
+      const id = typeof event.toolCallId === 'string' ? event.toolCallId : undefined;
+      const name = typeof event.toolName === 'string' ? event.toolName : 'unknown';
+      const call: MutableToolCall = { id, name, args: event.args };
+      toolCalls.push(call);
+      if (id) toolCallsById.set(id, call);
+      continue;
+    }
+
+    if (type === 'tool_execution_end') {
+      const id = typeof event.toolCallId === 'string' ? event.toolCallId : undefined;
+      const name = typeof event.toolName === 'string' ? event.toolName : 'unknown';
+      const call = (id ? toolCallsById.get(id) : undefined) ?? createToolCall(toolCalls, toolCallsById, id, name);
+      call.result = event.result;
+      call.isError = Boolean(event.isError);
+      if (call.isError) errors.push(`Tool ${name} failed`);
+      continue;
+    }
+
+    if (type === 'message_end' || type === 'turn_end') {
+      const message = isRecord(event.message) ? event.message : undefined;
+      if (message?.role === 'assistant') {
+        finalOutput = extractMessageText(message);
+        collectMessageError(message, errors);
+      }
+      continue;
+    }
+
+    if (type === 'agent_end' && Array.isArray(event.messages)) {
+      const assistant = [...event.messages]
+        .reverse()
+        .find((message): message is Record<string, unknown> => isRecord(message) && message.role === 'assistant');
+      if (assistant) {
+        finalOutput = extractMessageText(assistant);
+        collectMessageError(assistant, errors);
+      }
+    }
+  }
+
+  if (!finalOutput) {
+    const genericJson = parseJsonl(stdout);
+    const final = [...genericJson].reverse().find((event) => typeof event.output === 'string' || typeof event.text === 'string');
+    finalOutput = typeof final?.output === 'string' ? final.output : typeof final?.text === 'string' ? final.text : '';
+  }
+
+  return {
+    finalOutput,
+    toolCalls: toolCalls.map(({ id: _id, ...call }) => call),
+    errors,
+  };
+}
+
+function parseJsonl(input: string): Array<Record<string, unknown>> {
+  const events: Array<Record<string, unknown>> = [];
+  const lines = input.split(/\r?\n/).filter((line) => line.trim().length > 0);
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (isRecord(parsed)) events.push(parsed);
+    } catch {
+    }
+  }
+
+  return events;
+}
+
+function createToolCall(
+  toolCalls: MutableToolCall[],
+  toolCallsById: Map<string, MutableToolCall>,
+  id: string | undefined,
+  name: string,
+): MutableToolCall {
+  const call: MutableToolCall = { id, name };
+  toolCalls.push(call);
+  if (id) toolCallsById.set(id, call);
+  return call;
+}
+
+function extractMessageText(message: Record<string, unknown>): string {
+  const content = message.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') return part.text;
+      return '';
+    })
+    .join('');
+}
+
+function collectMessageError(message: Record<string, unknown>, errors: string[]): void {
+  const stopReason = message.stopReason;
+  if ((stopReason === 'error' || stopReason === 'aborted') && typeof message.errorMessage === 'string') {
+    errors.push(message.errorMessage);
+  }
+}
 
 function buildPiArgs(options: {
   command: string;
@@ -97,7 +227,7 @@ function buildPiArgs(options: {
   return args;
 }
 
-async function resolvePiSelection(agent: AgentPrepareInput['agent']): Promise<PiSelection> {
+async function resolvePiSelection(agent: AgentStepPrepareInput['agent']): Promise<PiSelection> {
   const apiKeyEnv = agent.apiKeyEnv ?? 'PI_EVAL_API_KEY';
   const currentDefaults = await readCurrentModelDefaults(agent);
   return {
@@ -108,7 +238,7 @@ async function resolvePiSelection(agent: AgentPrepareInput['agent']): Promise<Pi
   };
 }
 
-async function readCurrentModelDefaults(agent: AgentPrepareInput['agent']): Promise<{ provider?: string; model?: string }> {
+async function readCurrentModelDefaults(agent: AgentStepPrepareInput['agent']): Promise<{ provider?: string; model?: string }> {
   const settingsPath = join(getCurrentAgentDir(agent), 'settings.json');
   try {
     const raw = await readFile(settingsPath, 'utf8');
@@ -124,7 +254,7 @@ async function readCurrentModelDefaults(agent: AgentPrepareInput['agent']): Prom
 }
 
 async function writeSettings(
-  input: AgentPrepareInput,
+  input: AgentStepPrepareInput,
   config: Record<string, unknown>,
   useCurrentConfig: boolean,
 ): Promise<SettingsMetadata> {
@@ -188,7 +318,7 @@ async function loadAndRenderTemplate(projectRoot: string, template: string, cont
 async function loadAndRenderCurrentSettings(
   path: string,
   baseDir: string,
-  input: AgentPrepareInput,
+  input: AgentStepPrepareInput,
   warnings: string[],
 ): Promise<Record<string, unknown> | undefined> {
   if (!(await pathExists(path))) return undefined;
@@ -202,7 +332,7 @@ async function loadAndRenderCurrentSettings(
 function renderCurrentSettings(
   settings: Record<string, unknown>,
   baseDir: string,
-  input: AgentPrepareInput,
+  input: AgentStepPrepareInput,
   warnings: string[],
 ): Record<string, unknown> {
   const rendered: Record<string, unknown> = { ...settings };
@@ -224,13 +354,13 @@ function renderCurrentSettings(
   return rendered;
 }
 
-function renderPackageEntry(pkg: unknown, baseDir: string, input: AgentPrepareInput, warnings: string[]): unknown {
+function renderPackageEntry(pkg: unknown, baseDir: string, input: AgentStepPrepareInput, warnings: string[]): unknown {
   if (typeof pkg === 'string') return renderLocalSource(pkg, baseDir, input, warnings);
   if (!isRecord(pkg) || typeof pkg.source !== 'string') return pkg;
   return { ...pkg, source: renderLocalSource(pkg.source, baseDir, input, warnings) };
 }
 
-function renderLocalSource(source: string, baseDir: string, input: AgentPrepareInput, warnings: string[]): string {
+function renderLocalSource(source: string, baseDir: string, input: AgentStepPrepareInput, warnings: string[]): string {
   const renderedTemplate = renderTemplateString(source, input.docker.repoPath);
   if (!isLocalSource(renderedTemplate)) return renderedTemplate;
 
@@ -261,7 +391,7 @@ function renderTemplateString(value: string, containerRepoRoot: string): string 
   });
 }
 
-async function copyCurrentConfigFiles(input: AgentPrepareInput): Promise<Array<{ source: string; targetName: string; targetPath: string }>> {
+async function copyCurrentConfigFiles(input: AgentStepPrepareInput): Promise<Array<{ source: string; targetName: string; targetPath: string }>> {
   const agentDir = getCurrentAgentDir(input.agent);
   const copied: Array<{ source: string; targetName: string; targetPath: string }> = [];
 
@@ -282,13 +412,13 @@ export async function removePiSecretCopies(paths: readonly string[]): Promise<vo
   await Promise.all(paths.map((path) => rm(path, { force: true })));
 }
 
-function getCurrentProjectSettingsPath(input: AgentPrepareInput): string {
+function getCurrentProjectSettingsPath(input: AgentStepPrepareInput): string {
   const projectConfigDir = input.agent.projectConfigDirs?.[0];
   if (projectConfigDir) return join(resolveTrustedPath(input.projectRoot, projectConfigDir), 'settings.json');
   return join(input.projectRoot, '.pi', 'settings.json');
 }
 
-function getCurrentAgentDir(agent: AgentPrepareInput['agent']): string {
+function getCurrentAgentDir(agent: AgentStepPrepareInput['agent']): string {
   const configured = agent.userConfigDirs?.[0];
   if (configured) return expandTrustedPath(configured);
   return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.pi', 'agent');

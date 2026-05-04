@@ -5,6 +5,19 @@
   "bin": {
     "harness-evals": "./src/cli.ts"
   },
+  "description": "Agent-first coding-agent evaluation harness with Docker isolation, skills onboarding, and result reporting.",
+  "keywords": [
+    "agent-evals",
+    "coding-agents",
+    "skills",
+    "harness-evals"
+  ],
+  "files": [
+    "src",
+    "dist",
+    "skills",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,10 +26,11 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "test": "bun test"
   },
   "dependencies": {
+    "@mariozechner/pi-ai": "^0.72.1",
     "fast-glob": "^3.3.3",
     "yaml": "^2.8.2"
   },

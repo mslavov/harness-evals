@@ -1,8 +1,15 @@
-import { defineAdapter, type AgentAdapter, type AgentEventInput, type AgentPrepareInput, type AgentRunPlan } from './types.js';
+import { type AgentAdapter, type AgentEventInput, type AgentStepPrepareInput, type AgentStepRunPlan } from './types.js';
 
-export const claudeCodeAdapter: AgentAdapter = defineAdapter({
+export const claudeCodeAdapter: AgentAdapter = {
   name: 'claude-code',
-  async prepareRun(input: AgentPrepareInput): Promise<AgentRunPlan> {
+  getInstallRecipe(input) {
+    return Promise.resolve({
+      commands: ['npm install -g @anthropic-ai/claude-code'],
+      probes: [{ command: [input.agent.command ?? 'claude', '--version'] }],
+      cacheKey: '@anthropic-ai/claude-code',
+    });
+  },
+  async prepareStep(input: AgentStepPrepareInput): Promise<AgentStepRunPlan> {
     const argv = [input.agent.command ?? 'claude', '-p', input.prompt];
     if (input.agent.model) argv.push('--model', input.agent.model);
     if (input.agent.outputFormat) argv.push('--output-format', input.agent.outputFormat);
@@ -20,7 +27,7 @@ export const claudeCodeAdapter: AgentAdapter = defineAdapter({
   async parseEvents(input: AgentEventInput) {
     return { finalOutput: input.stdout.trim(), toolCalls: [], errors: input.stderr.trim() ? [input.stderr.trim()] : [] };
   },
-});
+};
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter(Boolean))];

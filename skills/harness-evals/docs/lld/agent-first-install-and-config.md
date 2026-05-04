@@ -10,13 +10,13 @@ This LLD defines the agent-first onboarding path. The framework ships an install
 
 ## 1. Domain Overview
 
-The primary onboarding path is a skill installed with the Skills CLI. A user installs the skill into one or more coding agents, activates it with `/harness-evals`, and lets the active agent configure the project from the design docs bundled with the skill.
+The primary onboarding path is a skill installed with the Skills CLI. A user installs the skill into one or more coding agents, activates it with `/harness-evals`, and lets the active agent configure the project from the design docs owned by the skill.
 
 The skill does not replace the CLI or runtime. It is the agent-facing setup guide for creating and maintaining `harness-evals.yaml`, test case files under `evals/tests/` by default, mock fixtures under `evals/mocks/`, adapter declarations, output provider config, visualization config, judge config, and project scoring config.
 
 ## 2. Distribution Layout
 
-The distributed skill package contains the skill instructions and the design docs used as the agent reference:
+The skill source contains the skill instructions and the design docs used as the agent reference:
 
 ```text
 skills/harness-evals/
@@ -35,7 +35,7 @@ skills/harness-evals/
       result-visualization.md
 ```
 
-`SKILL.md` contains an index pointing to the bundled docs:
+`SKILL.md` contains an index pointing to the skill docs:
 
 ```markdown
 ---
