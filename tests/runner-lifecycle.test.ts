@@ -625,7 +625,7 @@ if (args[0] !== 'run') {
 let index = 1;
 let workdir;
 const mounts = [];
-const env = { ...process.env };
+const env = { PATH: process.env.PATH };
 while (index < args.length) {
   const arg = args[index];
   if (arg === '--rm') {
