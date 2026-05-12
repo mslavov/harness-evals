@@ -16,26 +16,30 @@ The skill does not replace the CLI or runtime. It is the agent-facing setup guid
 
 ## 2. Distribution Layout
 
-The skill source contains the skill instructions and the design docs used as the agent reference:
+The skill source contains the skill instructions and bundled user/agent docs:
 
 ```text
 skills/harness-evals/
   SKILL.md
   docs/
-    HDL.md
-    lld/
-      agent-first-install-and-config.md
-      scenario-runner.md
-      adapter-registry-and-contract.md
-      managed-images.md
-      validation-scoring-and-judging.md
-      cost-and-artifacts.md
-      output-providers.md
-      mock-mcps-and-clis.md
-      result-visualization.md
+    index.md
+    getting-started.md
+    installation-and-configuration.md
+    concepts.md
+    cli-reference.md
+    writing-evals.md
+    use-cases.md
+    agents-and-adapters.md
+    docker-workspaces-and-images.md
+    mocks.md
+    scoring-and-judging.md
+    output-and-reports.md
+    troubleshooting.md
 ```
 
-`SKILL.md` contains an index pointing to the skill docs:
+Contributor architecture notes are kept outside the packaged skill under `docs/design/`.
+
+`SKILL.md` contains an index pointing to the bundled public docs:
 
 ```markdown
 ---
@@ -49,16 +53,18 @@ Use this skill when the user asks to install, configure, extend, or create tests
 
 ## Reference Docs
 
-- `docs/HDL.md`
-- `docs/lld/agent-first-install-and-config.md`
-- `docs/lld/scenario-runner.md`
-- `docs/lld/adapter-registry-and-contract.md`
-- `docs/lld/managed-images.md`
-- `docs/lld/validation-scoring-and-judging.md`
-- `docs/lld/cost-and-artifacts.md`
-- `docs/lld/output-providers.md`
-- `docs/lld/mock-mcps-and-clis.md`
-- `docs/lld/result-visualization.md`
+- `docs/index.md`
+- `docs/getting-started.md`
+- `docs/installation-and-configuration.md`
+- `docs/concepts.md`
+- `docs/cli-reference.md`
+- `docs/writing-evals.md`
+- `docs/agents-and-adapters.md`
+- `docs/docker-workspaces-and-images.md`
+- `docs/mocks.md`
+- `docs/scoring-and-judging.md`
+- `docs/output-and-reports.md`
+- `docs/troubleshooting.md`
 ```
 
 ## 3. Install and Activation Flow
@@ -87,7 +93,7 @@ Agents that do not support slash-style activation still load the skill by name o
 
 When activated, the skill instructs the agent to:
 
-1. Read `docs/HDL.md` and the LLDs relevant to the requested task.
+1. Read `docs/index.md` and the task/reference pages relevant to the requested task.
 2. Inspect the project package manager, language, test commands, Docker usage, existing CI, and existing agent configuration.
 3. Identify the active coding agent and ask which additional agents should be evaluated.
 4. Map selected agents to built-in adapters or declare custom adapters when needed.

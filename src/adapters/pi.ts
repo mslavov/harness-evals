@@ -29,14 +29,16 @@ interface SettingsMetadata {
 const RESOURCE_FIELDS = new Set(['extensions', 'skills', 'prompts', 'themes']);
 const NON_LOCAL_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https:', 'ssh:'];
 const SECRET_CONFIG_FILES = ['auth.json', 'models.json', 'model-tiers.json'];
+export const PI_AUTH_ENV_NAMES = ['PI_EVAL_API_KEY'] as const;
 
 export const piAdapter: AgentAdapter = {
   name: 'pi',
+  authEnvNames: PI_AUTH_ENV_NAMES,
   getInstallRecipe(input) {
     return Promise.resolve({
-      commands: ['npm install -g @mariozechner/pi-coding-agent'],
+      commands: ['npm install -g @earendil-works/pi-coding-agent'],
       probes: [{ command: [input.agent.command ?? 'pi', '--version'] }],
-      cacheKey: '@mariozechner/pi-coding-agent',
+      cacheKey: '@earendil-works/pi-coding-agent',
     });
   },
   async prepareStep(input: AgentStepPrepareInput): Promise<AgentStepRunPlan> {
@@ -228,7 +230,9 @@ function buildPiArgs(options: {
 }
 
 async function resolvePiSelection(agent: AgentStepPrepareInput['agent']): Promise<PiSelection> {
-  const apiKeyEnv = agent.apiKeyEnv ?? 'PI_EVAL_API_KEY';
+  const configuredApiKeyEnv = readString(agent.apiKeyEnv);
+  const implicitApiKeyEnv = readString(process.env.PI_EVAL_API_KEY) ? 'PI_EVAL_API_KEY' : undefined;
+  const apiKeyEnv = configuredApiKeyEnv ?? implicitApiKeyEnv;
   const currentDefaults = await readCurrentModelDefaults(agent);
   return {
     provider: readString(agent.provider) ?? readString(agent.providerEnv ? process.env[agent.providerEnv] : undefined) ?? readString(process.env.PI_EVAL_PROVIDER) ?? currentDefaults.provider,

@@ -47,7 +47,7 @@ export async function runHarness(options: RunHarnessOptions = {}): Promise<Harne
   const imageAgents = buildImageResolutionAgents(matrix);
   const results = await mapConcurrent(matrix, concurrency, (entry) => runTestCase(config, entry, registry, outputRegistry, imageAgents, options.judgeRunner));
   const cost = buildHarnessCostSummary(results);
-  const outputPath = await writeHarnessSummary(config, outputRegistry, matrix, results, cost);
+  const outputPath = await writeHarnessSummary(config, outputRegistry, registry, matrix, results, cost);
 
   return {
     pass: results.every((result) => result.pass),
@@ -69,21 +69,16 @@ export async function runTestCase(
   const runId = basename(runDir);
   const workspaceDir = join(runDir, 'workspace');
   const configDir = join(runDir, 'config');
-  const redactions = redactionsFromEnv(unique([
-    ...entry.docker.envAllowlist,
-    ...(entry.agent.envAllowlist ?? []),
-    ...(entry.agent.env ?? []),
-    ...entry.testCase.steps.flatMap((step) => step.env ?? []),
-    entry.agent.apiKeyEnv,
-    ...judgeApiKeyEnvNames(config, entry.testCase),
-  ]));
   const steps: ScenarioStepResult[] = [];
+  let redactions: Redaction[] = [];
   const runStartedAt = Date.now();
   let cleanupPaths: string[] = [];
   let dispatcher: OutputDispatcher | undefined;
   let currentStepId: string | undefined;
 
   try {
+    const adapterRegistry = registry ?? await createRunAdapterRegistry(config);
+    redactions = redactionsFromEnv(runRedactionEnvNames(config, entry, adapterRegistry));
     const activeOutputRegistry = outputRegistry ?? await createOutputProviderRegistry({
       projectRoot: config.projectRoot,
       outputRoot: config.outputRoot,
@@ -129,7 +124,6 @@ export async function runTestCase(
       },
     });
 
-    const adapterRegistry = registry ?? await createRunAdapterRegistry(config);
     const adapter = adapterRegistry.require(entry.agent.adapter);
     if (!adapter.applyMcpMocks && hasDeclaredMcpMocks(entry)) {
       throw new Error(`MCP mocks are declared for ${entry.testCase.id}, but adapter ${entry.agent.adapter} does not support applyMcpMocks`);
@@ -1037,18 +1031,13 @@ function hasFileVisualization(config: LoadedHarnessConfig): boolean {
 async function writeHarnessSummary(
   config: LoadedHarnessConfig,
   outputRegistry: OutputProviderRegistry,
+  registry: AdapterRegistry,
   matrix: MatrixEntry[],
   results: TestRunResult[],
   cost: CostSummary,
 ): Promise<string> {
   const runId = `summary-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-  const redactions = redactionsFromEnv(unique(matrix.flatMap((entry) => [
-    ...entry.docker.envAllowlist,
-    ...(entry.agent.envAllowlist ?? []),
-    ...(entry.agent.env ?? []),
-    entry.agent.apiKeyEnv,
-    ...judgeApiKeyEnvNames(config, entry.testCase),
-  ])));
+  const redactions = redactionsFromEnv(unique(matrix.flatMap((entry) => runRedactionEnvNames(config, entry, registry))));
   const dispatcher = await createOutputDispatcher({
     projectRoot: config.projectRoot,
     runId,
@@ -1170,6 +1159,22 @@ async function resolveAndEmitImage(input: {
 
 function buildImageResolutionAgents(matrix: MatrixEntry[]): ImageResolutionAgent[] {
   return matrix.map((entry) => ({ agentName: entry.agentName, agent: entry.agent }));
+}
+
+function runRedactionEnvNames(config: LoadedHarnessConfig, entry: MatrixEntry, registry: AdapterRegistry): string[] {
+  return unique([
+    ...entry.docker.envAllowlist,
+    ...(entry.agent.envAllowlist ?? []),
+    ...(entry.agent.env ?? []),
+    ...entry.testCase.steps.flatMap((step) => step.env ?? []),
+    entry.agent.apiKeyEnv,
+    ...adapterAuthEnvNames(registry, entry.agent.adapter),
+    ...judgeApiKeyEnvNames(config, entry.testCase),
+  ]);
+}
+
+function adapterAuthEnvNames(registry: AdapterRegistry, adapterName: string): string[] {
+  return [...(registry.require(adapterName).authEnvNames ?? [])];
 }
 
 function judgeApiKeyEnvNames(config: LoadedHarnessConfig, testCase: MatrixEntry['testCase']): string[] {

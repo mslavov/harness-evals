@@ -64,6 +64,9 @@ export function validateAdapterContract(value: unknown, field = 'adapter'): Agen
   if (!isRecord(value)) throw new Error(`${field} must export an adapter object`);
   if (typeof value.name !== 'string' || !value.name.trim()) throw new Error(`${field}.name must be a non-empty string`);
   if (value.version !== undefined && typeof value.version !== 'string') throw new Error(`${field}.version must be a string`);
+  if (value.authEnvNames !== undefined && (!Array.isArray(value.authEnvNames) || !value.authEnvNames.every((name) => typeof name === 'string' && name.trim()))) {
+    throw new Error(`${field}.authEnvNames must be an array of non-empty strings`);
+  }
   if (typeof value.prepareStep !== 'function') throw new Error(`${field}.prepareStep must be a function`);
   if (typeof value.parseEvents !== 'function') throw new Error(`${field}.parseEvents must be a function`);
   if (value.getInstallRecipe !== undefined && typeof value.getInstallRecipe !== 'function') throw new Error(`${field}.getInstallRecipe must be a function`);

@@ -156,7 +156,7 @@ For each test-case/agent entry, the runner creates an output context, copies the
 
 ### Agent-first installation and configuration
 
-The framework ships a `harness-evals` skill installable through the Skills CLI. The skill owns `docs/HDL.md` and `docs/lld/*.md` as source docs, exposes a docs index in `SKILL.md`, and uses those docs as the source of truth for agent-led setup.
+The framework ships a `harness-evals` skill installable through the Skills CLI. The packaged skill owns task-oriented docs under `skills/harness-evals/docs/`, while contributor architecture notes live under `docs/design/`. `SKILL.md` points agents at the bundled public docs for agent-led setup.
 
 When activated, the skill instructs the coding agent to collect project context, detect or ask for the active agent, ask which additional agents should be configured, gather desired test cases, install the framework package, create minimal harness config, and verify the first run.
 

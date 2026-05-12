@@ -11,7 +11,7 @@ export const commandAdapter: AgentAdapter = {
     return {
       argv,
       cwd: input.agent.cwd ?? input.workspace.containerPath,
-      envNames: unique([...(input.agent.envAllowlist ?? []), ...(input.agent.env ?? [])]),
+      envNames: unique([input.agent.apiKeyEnv, ...(input.agent.envAllowlist ?? []), ...(input.agent.env ?? [])]),
       configMounts: [],
       parser: input.agent.parser ?? 'text',
       timeoutMs: input.agent.timeoutMs,
@@ -30,6 +30,6 @@ function renderArgs(args: readonly string[], prompt: string): string[] {
   return args.map((arg) => arg.replace(/\{\{\s*prompt\s*}}/g, prompt));
 }
 
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
+function unique(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }

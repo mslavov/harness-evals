@@ -1,6 +1,6 @@
 # Harness Evals Implementation Tasks
 
-This task list turns the target architecture in `skills/harness-evals/docs/HDL.md` and `skills/harness-evals/docs/lld/*.md` into high-level implementation workstreams. It is based on the current `src/` implementation shape: single-prompt test cases, hardcoded built-in adapters, direct file artifact writes, ready-image Docker execution, and built-in assertions. Output providers, scoring, judging, cost accounting, managed images, MCP/CLI mocks, and result visualization are represented as task areas below.
+This task list turns the target architecture in `docs/design/HDL.md` and `docs/design/lld/*.md` into high-level implementation workstreams. It is based on the current `src/` implementation shape: single-prompt test cases, hardcoded built-in adapters, direct file artifact writes, ready-image Docker execution, and built-in assertions. Output providers, scoring, judging, cost accounting, managed images, MCP/CLI mocks, and result visualization are represented as task areas below.
 
 ## Dependency graph
 
@@ -249,9 +249,9 @@ T1..T9 ───────> T10 Agent-first skill packaging and onboarding
 ### T10 — Package the agent-first `harness-evals` skill and onboarding flow
 
 **Scope**
-- Add `skills/harness-evals/SKILL.md` with the docs index described in the LLD.
-- Keep `skills/harness-evals/docs/HDL.md` and `skills/harness-evals/docs/lld/*.md` as the skill-owned source docs.
-- Update package distribution so the Skills CLI can install the skill.
+- Add `skills/harness-evals/SKILL.md` with a bundled public docs index.
+- Keep user/agent-facing docs under `skills/harness-evals/docs/` and contributor architecture docs under `docs/design/`.
+- Update package distribution so the Skills CLI can install the skill without bundling root design docs.
 - Align `harness-evals init` output with the final test-case/config schema.
 - Add starter test case, optional mock fixture, visualization defaults, and validation flow that produces a working first eval.
 

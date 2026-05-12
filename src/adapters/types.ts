@@ -105,6 +105,7 @@ export interface AdapterProbe {
 export interface AgentAdapter {
   name: string;
   version?: string;
+  authEnvNames?: readonly string[];
   getInstallRecipe?(input: AdapterInstallInput): Promise<AdapterInstallRecipe | undefined>;
   applyMcpMocks?(input: ApplyMcpMocksInput): Promise<ApplyMcpMocksResult>;
   prepareStep(input: AgentStepPrepareInput): Promise<AgentStepRunPlan>;

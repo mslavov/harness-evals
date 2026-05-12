@@ -219,23 +219,41 @@ test('default llmJudge runtime dependency is declared', async () => {
   expect(packageJson.dependencies).toHaveProperty('@mariozechner/pi-ai');
 });
 
-test('packaged skill exposes docs index and safe onboarding guidance', async () => {
+test('packaged skill exposes public docs index and safe onboarding guidance', async () => {
   const root = join(import.meta.dir, '..');
   const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { files: string[]; keywords: string[] };
   const skill = await readFile(join(root, 'skills', 'harness-evals', 'SKILL.md'), 'utf8');
-  const bundledHld = await readFile(join(root, 'skills', 'harness-evals', 'docs', 'HDL.md'), 'utf8');
-  const bundledLld = await readFile(join(root, 'skills', 'harness-evals', 'docs', 'lld', 'agent-first-install-and-config.md'), 'utf8');
+  const docsDir = join(root, 'skills', 'harness-evals', 'docs');
+  const publicDocs = [
+    'index.md',
+    'getting-started.md',
+    'installation-and-configuration.md',
+    'concepts.md',
+    'cli-reference.md',
+    'writing-evals.md',
+    'use-cases.md',
+    'agents-and-adapters.md',
+    'docker-workspaces-and-images.md',
+    'mocks.md',
+    'scoring-and-judging.md',
+    'output-and-reports.md',
+    'troubleshooting.md',
+  ];
 
   expect(packageJson.files).toContain('skills');
   expect(packageJson.files).not.toContain('docs');
   expect(packageJson.keywords).toContain('skills');
   expect(skill).toContain('name: harness-evals');
-  expect(skill).toContain('docs/HDL.md');
-  expect(skill).toContain('docs/lld/result-visualization.md');
+  expect(skill).toContain('docs/index.md');
+  expect(skill).toContain('docs/cli-reference.md');
+  expect(skill).not.toContain(['HDL', 'md'].join('.'));
+  expect(skill).not.toContain('L' + 'LD');
+  expect(skill).not.toContain(['docs', 'lld'].join('/'));
   expect(skill).toContain('Ask one focused question at a time');
   expect(skill).toContain('Never write API keys, tokens, passwords, or secret values into repo files');
-  expect(bundledHld).toContain('Agent-first setup');
-  expect(bundledLld).toContain('Distribution Layout');
+  for (const doc of publicDocs) expect(existsSync(join(docsDir, doc))).toBe(true);
+  expect(existsSync(join(docsDir, 'HDL.md'))).toBe(false);
+  expect(existsSync(join(docsDir, 'lld'))).toBe(false);
 });
 
 test('adapter registry lists built-ins and allows project overrides', async () => {
