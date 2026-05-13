@@ -189,7 +189,7 @@ test('default llmJudge runtime dependency is declared', async () => {
   const root = join(import.meta.dir, '..');
   const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
 
-  expect(packageJson.dependencies).toHaveProperty('@mariozechner/pi-ai');
+  expect(packageJson.dependencies).toHaveProperty('@earendil-works/pi-ai');
 });
 
 test('packaged skill exposes public docs index and safe onboarding guidance', async () => {

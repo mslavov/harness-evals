@@ -4,7 +4,7 @@
     "": {
       "name": "harness-evals",
       "dependencies": {
-        "@mariozechner/pi-ai": "^0.72.1",
+        "@earendil-works/pi-ai": "^0.74.0",
         "fast-glob": "^3.3.3",
         "yaml": "^2.8.2",
       },
@@ -92,9 +92,9 @@
 
     "@babel/runtime": ["@babel/runtime@7.29.2", "", {}, "sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g=="],
 
-    "@google/genai": ["@google/genai@1.51.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-vTZZF3CSimN7cn2zsLpW2p5WF0eZa5Gz69ITMPCNHpPrDlAstOfGifSfi0p/s9Z9400f7xJRkgvkQNrcM7pJ6w=="],
+    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@0.74.0", "", { "dependencies": { "@anthropic-ai/sdk": "^0.91.1", "@aws-sdk/client-bedrock-runtime": "^3.1030.0", "@google/genai": "^1.40.0", "@mistralai/mistralai": "^2.2.0", "chalk": "^5.6.2", "openai": "6.26.0", "partial-json": "^0.1.7", "proxy-agent": "^6.5.0", "typebox": "^1.1.24", "undici": "^7.19.1", "zod-to-json-schema": "^3.24.6" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-7M7qcrZY/KEkH4wFkX3eqzvmKru4O88wezNKoN0KD2m4aAOmp9tdW2xCmUgSTSWlKB7b2Xw9QtAgrzHtg6t6iw=="],
 
-    "@mariozechner/pi-ai": ["@mariozechner/pi-ai@0.72.1", "", { "dependencies": { "@anthropic-ai/sdk": "^0.91.1", "@aws-sdk/client-bedrock-runtime": "^3.1030.0", "@google/genai": "^1.40.0", "@mistralai/mistralai": "^2.2.0", "chalk": "^5.6.2", "openai": "6.26.0", "partial-json": "^0.1.7", "proxy-agent": "^6.5.0", "typebox": "^1.1.24", "undici": "^7.19.1", "zod-to-json-schema": "^3.24.6" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-mOq71Pjnu72xxzwrh52VIiNwt+/a+Wpa11k5segi01/zTZJt8eMDc5Q2z6GhczYMr5+6EpZ8T+BaeHqq0jk5ag=="],
+    "@google/genai": ["@google/genai@1.51.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-vTZZF3CSimN7cn2zsLpW2p5WF0eZa5Gz69ITMPCNHpPrDlAstOfGifSfi0p/s9Z9400f7xJRkgvkQNrcM7pJ6w=="],
 
     "@mistralai/mistralai": ["@mistralai/mistralai@2.2.1", "", { "dependencies": { "ws": "^8.18.0", "zod": "^3.25.0 || ^4.0.0", "zod-to-json-schema": "^3.25.0" } }, "sha512-uKU8CZmL2RzYKmplsU01hii4p3pe4HqJefpWNRWXm1Tcm0Sm4xXfwSLIy4k7ZCPlbETCGcp69E7hZs+WOJ5itQ=="],
 

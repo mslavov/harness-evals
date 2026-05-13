@@ -52,11 +52,11 @@ export const defaultJudgeRunner: JudgeRunner = async (request) => {
 };
 
 async function importPiAi(): Promise<PiAiModule> {
-  const specifier: string = '@mariozechner/pi-ai';
+  const specifier: string = '@earendil-works/pi-ai';
   try {
     return await import(specifier) as PiAiModule;
   } catch (error) {
-    throw new Error(`Failed to load @mariozechner/pi-ai for llmJudge: ${errorMessage(error)}`);
+    throw new Error(`Failed to load @earendil-works/pi-ai for llmJudge: ${errorMessage(error)}`);
   }
 }
 
