@@ -71,6 +71,7 @@ export function validateAdapterContract(value: unknown, field = 'adapter'): Agen
   if (typeof value.parseEvents !== 'function') throw new Error(`${field}.parseEvents must be a function`);
   if (value.getInstallRecipe !== undefined && typeof value.getInstallRecipe !== 'function') throw new Error(`${field}.getInstallRecipe must be a function`);
   if (value.applyMcpMocks !== undefined && typeof value.applyMcpMocks !== 'function') throw new Error(`${field}.applyMcpMocks must be a function`);
+  if (value.complete !== undefined && typeof value.complete !== 'function') throw new Error(`${field}.complete must be a function`);
   return value as unknown as AgentAdapter;
 }
 

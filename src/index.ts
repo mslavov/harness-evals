@@ -1,4 +1,4 @@
-export { loadHarnessConfig, writeStarterConfig, type LoadHarnessConfigOptions } from './config/load.js';
+export { loadHarnessConfig, type LoadHarnessConfigOptions } from './config/load.js';
 export { runHarness, runTestCase, type RunHarnessOptions } from './runner/evaluate.js';
 export { buildMatrix } from './runner/matrix.js';
 export {
@@ -23,6 +23,7 @@ export {
 } from './adapters/registry.js';
 export {
   type AgentAdapter,
+  type AgentCompletionInput,
   type AgentEventInput,
   type AgentStepPrepareInput,
   type AgentStepRunPlan,
@@ -41,7 +42,7 @@ export { codexAdapter } from './adapters/codex.js';
 export { cursorAdapter } from './adapters/cursor.js';
 export { builtInAssertions, runAssertions } from './assertions/builtins.js';
 export type { AssertionContext, AssertionResult, AssertionRunner, AssertionRunOptions } from './assertions/types.js';
-export { defaultJudgeRunner } from './judge/index.js';
+export { createConfiguredJudgeRunner, defaultJudgeRunner } from './judge/index.js';
 export type { JudgeRecord, JudgeRequest, JudgeResult, JudgeRunner } from './judge/index.js';
 export { buildScenarioScoreSummary, buildScoreSummary } from './scoring/index.js';
 export type { ScoreBucketResult, ScoreSummary } from './scoring/index.js';

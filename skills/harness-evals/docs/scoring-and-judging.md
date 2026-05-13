@@ -71,7 +71,7 @@ The default prompt is built from the rubric and the selected inputs, and asks th
 {"score":0.0,"pass":true,"reason":"...","metadata":{}}
 ```
 
-## Judge defaults
+## Judge defaults and fallback
 
 You can set shared judge defaults at the top level:
 
@@ -85,9 +85,15 @@ judge:
 
 Each `llmJudge` may override `provider`, `model`, `apiKeyEnv`, `temperature`, and `promptTemplate`.
 
-A run will fail fast during config loading if a judge assertion is missing `provider`, `model`, or `apiKeyEnv` after applying top-level defaults.
+If explicit judge config is used, `provider`, `model`, and `apiKeyEnv` must all be present after applying top-level defaults. Config loading fails when only some of those fields are present.
 
-At execution time, the default judge runner also requires the named environment variable to be set. If it is missing, the assertion fails with an error like `Judge credential env ... is not set`.
+If no explicit judge provider/model/api key is configured, harness-evals uses the first configured agent whose adapter supports headless `complete()` calls. That adapter receives the judge prompt as a single string and must return the judge response as a string. The response must still be JSON with the normal `score`, optional `pass`, `reason`, and optional `metadata` fields.
+
+For the built-in `pi` adapter, fallback judging invokes the Pi CLI with `pi -p` so it can reuse credentials already configured for Pi. You do not need to add separate judge API key config for that path.
+
+At execution time, explicit judge config uses the default judge runner and requires the named environment variable to be set. If it is missing, the assertion fails with an error like `Judge credential env ... is not set`.
+
+If no explicit judge config exists and no configured adapter supports `complete()`, the assertion fails with a message saying that an adapter-backed judge is required.
 
 ## Scoring weights
 

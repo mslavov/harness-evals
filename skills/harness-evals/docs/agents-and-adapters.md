@@ -190,7 +190,29 @@ Resolution rules:
 - `module` can be a relative project path, an absolute path inside the project root, a project subpath, or a package specifier
 - if `export` is omitted, harness-evals tries `default` and then `adapter`
 - the exported adapter object must implement `prepareStep` and `parseEvents`
+- the adapter may also implement `complete(input)` for headless string-in/string-out LLM calls
 - the adapter's `name` must match the declaration key
+
+### Headless completion for judge fallback
+
+Adapters that can answer a single prompt without a full scenario run may expose `complete(input): Promise<string>`.
+
+```ts
+export const adapter = {
+  name: 'acme-code',
+  async prepareStep(input) {
+    // normal scenario execution
+  },
+  async parseEvents(input) {
+    return { finalOutput: input.stdout.trim(), toolCalls: [], errors: [] };
+  },
+  async complete(input) {
+    return await callModel(input.input);
+  },
+};
+```
+
+When an `llmJudge` assertion has no explicit `provider`, `model`, or `apiKeyEnv`, harness-evals selects the first configured agent whose adapter implements `complete()`. The adapter receives the full judge prompt in `input.input` and must return a string containing the normal judge JSON. The built-in `pi` adapter implements this by invoking `pi -p`, which reuses the user's configured Pi credentials.
 
 Project adapters can also replace a built-in by reusing its name:
 

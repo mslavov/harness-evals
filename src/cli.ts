@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { loadHarnessConfig, writeStarterConfig } from './config/load.js';
+import { loadHarnessConfig } from './config/load.js';
 import { buildMatrix } from './runner/matrix.js';
 import { runHarness } from './runner/evaluate.js';
 import type { CliOverrides } from './config/schema.js';
@@ -25,14 +25,6 @@ interface ParsedArgs extends CliOverrides {
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
-
-  if (parsed.command === 'init') {
-    const path = resolve(process.cwd(), parsed.configPath ?? 'harness-evals.yaml');
-    if (existsSync(path)) throw new Error(`Config already exists: ${path}`);
-    await writeStarterConfig(path);
-    console.log(`Created ${path}`);
-    return;
-  }
 
   if (parsed.command === 'list') {
     const config = await loadHarnessConfig({ configPath: parsed.configPath });
@@ -319,7 +311,6 @@ function printHelp(): void {
 Commands:
   harness-evals run [--config path] [--suite name] [--case id] [--agents a,b] [--concurrency n]
   harness-evals list [--config path]
-  harness-evals init [--config path]
   harness-evals view [--config path] [--run id] [--latest] [--open] [--port n]
   harness-evals export [--config path] [--run id] --format html|json|csv --output path
 

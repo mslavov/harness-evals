@@ -2,17 +2,19 @@
 
 Use one YAML file per test case. By default harness-evals loads `evals/tests/**/*.yaml`.
 
+Start from the behavior the user wants to preserve or compare. Before writing YAML, identify the task, starting workspace, agents to compare, success criteria, and whether the scenario comes from a new prompt, existing session, real failure, or repeated workflow.
+
 ## Minimal test case
 
 ```yaml
-id: starter-smoke
-suite: smoke
-prompt: Reply with HARNESS_EVALS_OK and do not edit files.
+id: readme-update
+suite: docs
+prompt: Update the README quick-start section to mention the new install command.
 assert:
-  - type: contains
-    value: HARNESS_EVALS_OK
+  - type: exitCode
+    equals: 0
   - type: workspaceDiff
-    changedFiles: []
+    changedFiles: [README.md]
 ```
 
 If you omit `steps`, harness-evals creates a single step with id `run`.

@@ -2,9 +2,9 @@ import type { JudgeInputRef } from '../config/schema.js';
 
 export interface JudgeRequest {
   assertionId?: string;
-  provider: string;
-  model: string;
-  apiKeyEnv: string;
+  provider?: string;
+  model?: string;
+  apiKeyEnv?: string;
   temperature?: number;
   rubric: string;
   threshold: number;

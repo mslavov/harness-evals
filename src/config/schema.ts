@@ -93,9 +93,9 @@ export interface VisualizationConfig {
 }
 
 export interface JudgeDefaults {
-  provider: string;
-  model: string;
-  apiKeyEnv: string;
+  provider?: string;
+  model?: string;
+  apiKeyEnv?: string;
   temperature?: number;
   promptTemplate?: string;
 }

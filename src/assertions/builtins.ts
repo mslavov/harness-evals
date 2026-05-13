@@ -1,5 +1,4 @@
 import type { AssertionConfig, JudgeInputRef, LlmJudgeAssertionConfig } from '../config/schema.js';
-import { defaultJudgeRunner } from '../judge/default.js';
 import type { JudgeRecord, JudgeRequest, JudgeResult } from '../judge/types.js';
 import { redactJson, redactString } from '../redaction.js';
 import type { AssertionContext, AssertionResult, AssertionRunner, AssertionRunOptions } from './types.js';
@@ -203,8 +202,8 @@ async function llmJudge(config: LlmJudgeAssertionConfig, context: AssertionConte
   }
 
   try {
-    const runner = options.judgeRunner ?? defaultJudgeRunner;
-    const judgeResult = validateJudgeResult(await runner(resolved.request));
+    if (!options.judgeRunner) throw new Error('llmJudge requires a configured judge runner');
+    const judgeResult = validateJudgeResult(await options.judgeRunner(resolved.request));
     const pass = judgeResult.score >= config.threshold && judgeResult.pass !== false;
     const reason = judgeResult.pass === false && judgeResult.score >= config.threshold
       ? `Judge explicitly failed: ${judgeResult.reason}`
@@ -252,9 +251,12 @@ function resolveJudgeRequest(
   const provider = config.judge.provider ?? options.judgeDefaults?.provider;
   const model = config.judge.model ?? options.judgeDefaults?.model;
   const apiKeyEnv = config.judge.apiKeyEnv ?? options.judgeDefaults?.apiKeyEnv;
-  if (!provider) return { ok: false, reason: 'llmJudge requires judge.provider or top-level judge.provider' };
-  if (!model) return { ok: false, reason: 'llmJudge requires judge.model or top-level judge.model' };
-  if (!apiKeyEnv) return { ok: false, reason: 'llmJudge requires judge.apiKeyEnv or top-level judge.apiKeyEnv' };
+  const hasExplicitJudgeConfig = Boolean(provider || model || apiKeyEnv);
+  if (hasExplicitJudgeConfig) {
+    if (!provider) return { ok: false, reason: 'llmJudge requires judge.provider or top-level judge.provider when explicit judge config is used' };
+    if (!model) return { ok: false, reason: 'llmJudge requires judge.model or top-level judge.model when explicit judge config is used' };
+    if (!apiKeyEnv) return { ok: false, reason: 'llmJudge requires judge.apiKeyEnv or top-level judge.apiKeyEnv when explicit judge config is used' };
+  }
 
   const inputs = redactJson(buildJudgeInputs(config.judge.inputs, context), options.redactions ?? []) as Partial<Record<JudgeInputRef, unknown>>;
   const prompt = redactString(buildJudgePrompt(config, inputs, config.judge.promptTemplate ?? options.judgeDefaults?.promptTemplate), options.redactions ?? []);

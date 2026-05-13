@@ -57,20 +57,6 @@ Output includes:
 - matrix entry count after filters
 - runtime image mode: ready image vs managed image
 
-### `init`
-
-Create a starter config.
-
-```bash
-harness-evals init [--config path]
-```
-
-Behavior:
-
-- Default path: `./harness-evals.yaml`
-- Fails if the target config already exists.
-- Writes the config file and also creates `evals/tests/starter-smoke.yaml` if it does not already exist.
-
 ### `view`
 
 Locate or serve rendered reports.

@@ -1,5 +1,4 @@
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import fg from 'fast-glob';
 import YAML from 'yaml';
@@ -59,7 +58,7 @@ export async function loadHarnessConfig(options: LoadHarnessConfigOptions = {}):
   const interpolated = interpolateEnv(rawConfig);
   const config = normalizeHarnessConfig(withHarnessDefaults(readHarnessConfig(interpolated)), projectRoot);
   const testCases = await loadTestCases(config.tests, projectRoot, config.mocks);
-  validateJudgeAssertionDefaults(testCases, config.judge);
+  validateExplicitJudgeConfig(testCases, config.judge);
 
   return {
     ...config,
@@ -67,16 +66,6 @@ export async function loadHarnessConfig(options: LoadHarnessConfigOptions = {}):
     configPath,
     testCases,
   };
-}
-
-export async function writeStarterConfig(path: string): Promise<void> {
-  const projectRoot = dirname(path);
-  const testPath = join(projectRoot, 'evals', 'tests', 'starter-smoke.yaml');
-
-  await mkdir(projectRoot, { recursive: true });
-  await mkdir(dirname(testPath), { recursive: true });
-  await writeFile(path, `${STARTER_CONFIG.trim()}\n`);
-  if (!existsSync(testPath)) await writeFile(testPath, `${STARTER_TEST_CASE.trim()}\n`);
 }
 
 async function loadTestCases(patterns: string[], projectRoot: string, mocks: MockConfig): Promise<TestCase[]> {
@@ -308,16 +297,10 @@ function readJudgeDefaults(value: unknown): JudgeDefaults | undefined {
   if (value === undefined || value === null) return undefined;
   if (!isRecord(value)) throw new Error('judge must be an object');
   assertKnownKeys(value, ['provider', 'model', 'apiKeyEnv', 'temperature', 'promptTemplate'], 'judge');
-  const provider = readOptionalString(value.provider, 'judge.provider');
-  const model = readOptionalString(value.model, 'judge.model');
-  const apiKeyEnv = readOptionalString(value.apiKeyEnv, 'judge.apiKeyEnv');
-  if (!provider) throw new Error('judge.provider is required');
-  if (!model) throw new Error('judge.model is required');
-  if (!apiKeyEnv) throw new Error('judge.apiKeyEnv is required');
   return {
-    provider,
-    model,
-    apiKeyEnv,
+    provider: readOptionalString(value.provider, 'judge.provider'),
+    model: readOptionalString(value.model, 'judge.model'),
+    apiKeyEnv: readOptionalString(value.apiKeyEnv, 'judge.apiKeyEnv'),
     temperature: readOptionalNumber(value.temperature, 'judge.temperature'),
     promptTemplate: readOptionalString(value.promptTemplate, 'judge.promptTemplate'),
   };
@@ -549,19 +532,23 @@ function readJudgeAssertion(value: unknown, field: string): JudgeAssertionDefini
   };
 }
 
-function validateJudgeAssertionDefaults(testCases: TestCase[], defaults: JudgeDefaults | undefined): void {
+function validateExplicitJudgeConfig(testCases: TestCase[], defaults: JudgeDefaults | undefined): void {
   for (const testCase of testCases) {
     for (const step of testCase.steps) {
       for (const assertion of step.assert) {
         if (assertion.type !== 'llmJudge') continue;
         const judgeAssertion = assertion as AssertionConfig & { judge: JudgeAssertionDefinition };
+        const provider = judgeAssertion.judge.provider ?? defaults?.provider;
+        const model = judgeAssertion.judge.model ?? defaults?.model;
+        const apiKeyEnv = judgeAssertion.judge.apiKeyEnv ?? defaults?.apiKeyEnv;
+        if (!provider && !model && !apiKeyEnv) continue;
         const missing = [
-          (judgeAssertion.judge.provider ?? defaults?.provider) ? undefined : 'provider',
-          (judgeAssertion.judge.model ?? defaults?.model) ? undefined : 'model',
-          (judgeAssertion.judge.apiKeyEnv ?? defaults?.apiKeyEnv) ? undefined : 'apiKeyEnv',
+          provider ? undefined : 'provider',
+          model ? undefined : 'model',
+          apiKeyEnv ? undefined : 'apiKeyEnv',
         ].filter((value): value is string => Boolean(value));
         if (missing.length > 0) {
-          throw new Error(`llmJudge assertion ${judgeAssertion.id ?? judgeAssertion.type} in ${testCase.id}.${step.id} requires judge.${missing.join(', ')} or top-level judge defaults`);
+          throw new Error(`llmJudge assertion ${judgeAssertion.id ?? judgeAssertion.type} in ${testCase.id}.${step.id} requires judge.${missing.join(', ')} when explicit judge config is used`);
         }
       }
     }
@@ -689,73 +676,3 @@ function readOptionalRecord(value: unknown, field: string): Record<string, unkno
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
-
-const STARTER_CONFIG = `
-version: 1
-
-artifactRoot: .harness-evals/runs
-outputRoot: .harness-evals/output
-
-workspace:
-  source: .
-  mode: copy
-  containerPath: /workspace
-  ignore:
-    - .git
-    - node_modules
-    - .harness-evals
-
-docker:
-  repoPath: /workspace
-
-agents:
-  local-command:
-    adapter: command
-    command: echo
-    args:
-      - "{{ prompt }}"
-
-output:
-  providers:
-    - type: file
-
-visualization:
-  enabled: true
-  formats: [html, json, csv]
-  latest: true
-  include:
-    logs: true
-    workspaceDiff: true
-    toolCalls: true
-    mockCalls: true
-    judgeDetails: true
-
-scoring:
-  assertionPassRate:
-    weight: 1
-  judgeScore:
-    weight: 1
-  latency:
-    weight: 0
-  cost:
-    weight: 0
-  tokenUsage:
-    weight: 0
-
-tests:
-  - evals/tests/**/*.yaml
-`;
-
-const STARTER_TEST_CASE = `
-id: starter-smoke
-description: Starter validation that exercises the harness without requiring agent credentials.
-suite: smoke
-agents:
-  include: [local-command]
-prompt: Reply with HARNESS_EVALS_OK and do not edit files.
-assert:
-  - type: contains
-    value: HARNESS_EVALS_OK
-  - type: workspaceDiff
-    changedFiles: []
-`;

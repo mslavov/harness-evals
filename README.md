@@ -13,7 +13,7 @@ npx skills add harness-evals --skill harness-evals
 Then open your coding agent and ask it to use the skill, for example:
 
 ```text
-/harness-evals Set up evals for this project and create a first smoke eval.
+can you setup evals for this project?
 ```
 
 The skill guides the agent to:
@@ -21,18 +21,20 @@ The skill guides the agent to:
 - check whether the `harness-evals` CLI is installed
 - ask whether to install the CLI globally or locally in the project when it is missing
 - inspect the project structure, package manager, test commands, Docker usage, CI, and existing agent config
+- ask what you want to test and how before creating cases
+- optionally derive cases from existing sessions, failures, or repeated workflows
 - map your goals to eval cases, agents, mocks, assertions, scoring, and reports
-- create or update `harness-evals.yaml` and eval files
+- create or update `harness-evals.yaml` and goal-specific eval files
 - run `harness-evals list` and a focused first validation run
 
-## Manual CLI quick check
+## After setup
 
-If the CLI is already installed globally, use `harness-evals`. If it is installed locally, use your package runner such as `npx harness-evals`, `pnpm exec harness-evals`, or `bunx harness-evals`.
+After your agent creates `harness-evals.yaml` and the first goal-specific cases, use the CLI loop directly. If the CLI is installed locally, use your package runner such as `npx harness-evals`, `pnpm exec harness-evals`, or `bunx harness-evals`.
 
 ```bash
-harness-evals init
 harness-evals list
-harness-evals run --case starter-smoke --agents local-command
+harness-evals run --case <case-id> --agents <agent-name>
+harness-evals view --open
 ```
 
 `harness-evals` runs coding agents in Docker. If `docker.image` is set, that ready image is used directly. Otherwise the harness builds and reuses a local managed image from the selected adapters' installation recipes.

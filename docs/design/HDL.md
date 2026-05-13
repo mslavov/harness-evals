@@ -96,7 +96,7 @@ For each test-case/agent entry, the runner creates an output context, copies the
 2. User activates the skill with `/harness-evals`.
 3. The active agent reads the bundled docs index from the skill.
 4. The agent inspects the project and asks for missing setup inputs.
-5. The agent installs the framework package, creates or updates `harness-evals.yaml`, adds selected agents, creates starter test cases under `evals/tests/`, creates mock fixtures under `evals/mocks/` when needed, configures judge/scoring/output/visualization defaults, and runs validation.
+5. The agent installs the framework package, interviews the user about the evaluation goal, creates or updates `harness-evals.yaml`, adds selected agents, creates goal-specific test cases under `evals/tests/`, creates mock fixtures under `evals/mocks/` when needed, configures judge/scoring/output/visualization defaults, and runs validation.
 
 ### Managed-image test run
 
@@ -272,7 +272,7 @@ Visualization is a read model, not the source of truth. Output records and provi
 - Scoring combines assertion pass rates, judge assertion scores, and project-configured structured metrics.
 - Assertions are defined on individual test cases and steps.
 - `type: llmJudge` is an assertion type with a required score threshold.
-- LLM-as-judge requests use `@mariozechner/pi-ai`.
+- Explicit LLM-as-judge requests use `@mariozechner/pi-ai`; otherwise the first configured agent adapter with headless completion can act as the judge.
 - Top-level judge config defines LLM-as-judge defaults.
 - Project-level scoring config defines score types and weights.
 - Output persistence is handled by output providers.
@@ -280,7 +280,7 @@ Visualization is a read model, not the source of truth. Output records and provi
 - Multiple output providers can be configured and receive the same normalized output records.
 - Result visualization writes static HTML plus JSON/CSV exports from normalized output records.
 - `harness-evals view` opens or serves latest and historical reports.
-- The primary onboarding path is an installable `harness-evals` skill distributed with the design docs.
+- The primary onboarding path is an installable `harness-evals` skill distributed with public setup and usage docs.
 
 ### Open decisions
 

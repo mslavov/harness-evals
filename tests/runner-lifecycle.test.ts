@@ -403,6 +403,75 @@ steps:
   }
 });
 
+test('llmJudge can fall back to the first configured adapter with complete()', async () => {
+  const root = await tempRoot();
+  const restoreDocker = await installFakeDocker(root);
+  const prepareCalls: PrepareCall[] = [];
+  const completionPrompts: string[] = [];
+  const judgeAdapter: AgentAdapter = {
+    name: 'judge-complete',
+    async complete(input) {
+      completionPrompts.push(input.input);
+      return '{"score":0.85,"pass":true,"reason":"Looks good"}';
+    },
+    async prepareStep() {
+      return { argv: ['node', '-e', 'console.log("unused")'], cwd: '/workspace', envNames: [], configMounts: [], parser: 'text' };
+    },
+    async parseEvents(input) {
+      return { finalOutput: input.stdout.trim(), toolCalls: [], errors: [] };
+    },
+  };
+
+  try {
+    await mkdir(join(root, 'cases'), { recursive: true });
+    await mkdir(join(root, 'fixture'), { recursive: true });
+    await writeFile(join(root, 'fixture', 'README.md'), 'fixture');
+    await writeFile(join(root, 'harness-evals.yaml'), `
+version: 1
+docker:
+  image: fake-image
+  timeoutMs: 1000
+agents:
+  judge:
+    adapter: judge-complete
+  lifecycle:
+    adapter: lifecycle
+tests:
+  - cases/*.yaml
+`);
+    await writeFile(join(root, 'cases', 'case.yaml'), `
+id: adapter-judged
+agents:
+  include: [lifecycle]
+prompt: produce output
+config:
+  script: |
+    console.log('OK from subject');
+assert:
+  - id: quality
+    type: llmJudge
+    threshold: 0.8
+    judge:
+      rubric: Score quality from 0 to 1.
+      inputs: [finalOutput]
+`);
+
+    const result = await runHarness({ cwd: root, adapters: [judgeAdapter, createLifecycleAdapter(prepareCalls)] });
+    const run = result.results[0];
+    const step = run.steps[0];
+
+    expect(result.pass).toBe(true);
+    expect(completionPrompts).toHaveLength(1);
+    expect(completionPrompts[0]).toContain('Score quality from 0 to 1.');
+    expect(completionPrompts[0]).toContain('OK from subject');
+    expect(step.assertions.find((assertion) => assertion.id === 'quality')).toMatchObject({ pass: true, score: 0.85, threshold: 0.8 });
+    const judgeRecord = JSON.parse(await readFile(join(run.runDir, 'steps', 'run', 'judges', 'quality.json'), 'utf8'));
+    expect(judgeRecord).toMatchObject({ assertionId: 'quality', score: 0.85, pass: true, metadata: { judge: { source: 'agent-adapter', agentName: 'judge', adapter: 'judge-complete' } } });
+  } finally {
+    restoreDocker();
+  }
+});
+
 test('llmJudge assertions emit judge and score records without changing pass gates', async () => {
   const root = await tempRoot();
   const restoreDocker = await installFakeDocker(root);

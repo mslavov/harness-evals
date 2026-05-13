@@ -19,6 +19,7 @@ import { createOutputProviderRegistry, type OutputProviderRegistry } from '../ou
 import { readMockCallLogs, strictMockFailures, summarizeMockCalls } from '../mocks/calls.js';
 import { applyMockRuntimeToPlan, buildMockConfigPayload as buildStagedMockConfigPayload, mergeMockDeclarations, stageMockRuntime } from '../mocks/stage.js';
 import type { MockCallSummary } from '../events/types.js';
+import { createConfiguredJudgeRunner } from '../judge/configured.js';
 import type { JudgeRunner } from '../judge/types.js';
 import type { MockCallRecord } from '../mocks/types.js';
 import { buildScenarioScoreSummary, buildScoreSummary } from '../scoring/index.js';
@@ -45,7 +46,8 @@ export async function runHarness(options: RunHarnessOptions = {}): Promise<Harne
   validateAdapterReferences(registry, matrix.map((entry) => entry.agent.adapter));
   const concurrency = options.concurrency ?? 1;
   const imageAgents = buildImageResolutionAgents(matrix);
-  const results = await mapConcurrent(matrix, concurrency, (entry) => runTestCase(config, entry, registry, outputRegistry, imageAgents, options.judgeRunner));
+  const judgeRunner = options.judgeRunner ?? createConfiguredJudgeRunner({ config, registry });
+  const results = await mapConcurrent(matrix, concurrency, (entry) => runTestCase(config, entry, registry, outputRegistry, imageAgents, judgeRunner));
   const cost = buildHarnessCostSummary(results);
   const outputPath = await writeHarnessSummary(config, outputRegistry, registry, matrix, results, cost);
 
@@ -124,6 +126,7 @@ export async function runTestCase(
       },
     });
 
+    const activeJudgeRunner = judgeRunner ?? createConfiguredJudgeRunner({ config, registry: adapterRegistry });
     const adapter = adapterRegistry.require(entry.agent.adapter);
     if (!adapter.applyMcpMocks && hasDeclaredMcpMocks(entry)) {
       throw new Error(`MCP mocks are declared for ${entry.testCase.id}, but adapter ${entry.agent.adapter} does not support applyMcpMocks`);
@@ -174,6 +177,7 @@ export async function runTestCase(
         config,
         entry,
         adapter,
+        adapterRegistry,
         dispatcher,
         context,
         step,
@@ -181,7 +185,7 @@ export async function runTestCase(
         beforeSnapshot,
         dockerImage,
         redactions,
-        judgeRunner,
+        judgeRunner: activeJudgeRunner,
       });
       cleanupPaths.push(...execution.cleanupPaths);
       steps.push(execution.result);
@@ -226,6 +230,7 @@ interface ExecuteScenarioStepInput {
   config: LoadedHarnessConfig;
   entry: MatrixEntry;
   adapter: AgentAdapter;
+  adapterRegistry: AdapterRegistry;
   dispatcher: OutputDispatcher;
   context: ScenarioRunContext;
   step: MatrixEntry['testCase']['steps'][number];

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claudeCodeAdapter } from '../src/adapters/claude-code.js';
@@ -27,6 +27,8 @@ const AUTH_ENV_NAMES = [
   'XDG_CONFIG_HOME',
   'CUSTOM_AGENT_KEY',
   'CUSTOM_ADAPTER_TOKEN',
+  'PI_CODING_AGENT_DIR',
+  'PI_CAPTURE_PATH',
 ];
 
 afterEach(async () => {
@@ -177,6 +179,42 @@ test('pi omits absent implicit PI_EVAL_API_KEY and --api-key without a key value
 
   expect(plan.envNames).not.toContain('PI_EVAL_API_KEY');
   expect(plan.argv).not.toContain('--api-key');
+});
+
+test('pi complete uses pi print mode and current pi credentials', async () => {
+  clearAuthEnv();
+  const root = await tempRoot();
+  const binDir = join(root, 'bin');
+  const agentDir = join(root, 'pi-agent');
+  const capturePath = join(root, 'pi-complete.json');
+  await mkdir(binDir, { recursive: true });
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(join(binDir, 'pi'), FAKE_PI_COMPLETE);
+  await chmod(join(binDir, 'pi'), 0o755);
+  setEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+  setEnv('PI_CAPTURE_PATH', capturePath);
+
+  const output = await piAdapter.complete!({
+    projectRoot: root,
+    agentName: 'pi-judge',
+    agent: { adapter: 'pi', userConfigDirs: [agentDir] },
+    input: 'Judge this output.',
+  });
+  const capture = JSON.parse(await readFile(capturePath, 'utf8')) as { args: string[]; cwd: string; piDir?: string };
+
+  expect(output).toBe('{"score":0.9,"pass":true,"reason":"ok"}');
+  expect(capture.cwd).toBe(await realpath(root));
+  expect(capture.piDir).toBe(agentDir);
+  expect(capture.args).toContain('-p');
+  expect(capture.args).toContain('--no-tools');
+  expect(capture.args).toContain('--no-session');
+  expect(capture.args).toContain('--no-context-files');
+  expect(capture.args).toContain('--system-prompt');
+  expect(capture.args).toContain('You are a strict evaluation judge. Return only valid JSON.');
+  expect(capture.args).not.toContain('--api-key');
+  expect(capture.args).not.toContain('--provider');
+  expect(capture.args).not.toContain('--model');
+  expect(capture.args.at(-1)).toBe('Judge this output.');
 });
 
 test('run redaction includes adapter-default auth envs', async () => {
@@ -349,6 +387,17 @@ function restoreEnv(): void {
     else process.env[name] = value;
   }
 }
+
+const FAKE_PI_COMPLETE = `#!/usr/bin/env node
+const { writeFileSync } = require('node:fs');
+
+writeFileSync(process.env.PI_CAPTURE_PATH, JSON.stringify({
+  args: process.argv.slice(2),
+  cwd: process.cwd(),
+  piDir: process.env.PI_CODING_AGENT_DIR,
+}));
+process.stdout.write('{"score":0.9,"pass":true,"reason":"ok"}\\n');
+`;
 
 const FAKE_DOCKER = `#!/usr/bin/env node
 const { spawnSync } = require('node:child_process');

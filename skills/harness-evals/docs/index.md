@@ -14,7 +14,7 @@ Use it when you want to:
 
 ### I am setting up a project through an agent
 
-Start with [Installation and configuration](./installation-and-configuration.md). The expected flow is: install the skill, ask your coding agent to set up evals, let it check or install the CLI, then let it create the first focused eval with you.
+Start with [Installation and configuration](./installation-and-configuration.md). The expected flow is: install the skill, ask your coding agent to set up evals, let it check or install the CLI, then have it interview you about what you want to test before it creates the first focused eval.
 
 ### I want a first passing run
 
@@ -52,7 +52,7 @@ A minimal project usually has:
 - `.harness-evals/runs/` for per-run artifacts
 - `.harness-evals/output/latest/` for the latest aggregated report
 
-The built-in starter created by `harness-evals init` uses a `local-command` agent with the `command` adapter and a `starter-smoke` case under `evals/tests/starter-smoke.yaml`.
+The first case should be goal-specific: a workflow, regression, comparison, or behavior the user actually wants to evaluate.
 
 ## Common tasks
 
@@ -61,7 +61,7 @@ The built-in starter created by `harness-evals init` uses a `local-command` agen
 Define multiple agents in `harness-evals.yaml`, then run:
 
 ```bash
-harness-evals run --case starter-smoke --agents pi,claude,codex
+harness-evals run --case checkout-refactor --agents pi,claude,codex
 ```
 
 ### Run a single suite or case during development

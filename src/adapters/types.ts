@@ -28,6 +28,13 @@ export interface AgentStepPrepareInput {
   continuation?: AdapterContinuation;
 }
 
+export interface AgentCompletionInput {
+  projectRoot: string;
+  agentName: string;
+  agent: ResolvedAgentConfig;
+  input: string;
+}
+
 export interface ConfigMount {
   source: string;
   target: string;
@@ -108,6 +115,7 @@ export interface AgentAdapter {
   authEnvNames?: readonly string[];
   getInstallRecipe?(input: AdapterInstallInput): Promise<AdapterInstallRecipe | undefined>;
   applyMcpMocks?(input: ApplyMcpMocksInput): Promise<ApplyMcpMocksResult>;
+  complete?(input: AgentCompletionInput): Promise<string>;
   prepareStep(input: AgentStepPrepareInput): Promise<AgentStepRunPlan>;
   parseEvents(input: AgentEventInput): Promise<AgentEventsSummary>;
 }

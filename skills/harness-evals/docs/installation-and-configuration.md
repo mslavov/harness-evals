@@ -12,13 +12,13 @@ Install the skill with the Skills CLI:
 npx skills add harness-evals --skill harness-evals
 ```
 
-Then open your coding agent and ask it to set up evals, create a first eval, or validate the project setup:
+Then open your coding agent and ask it to interview you before creating eval files:
 
 ```text
-/harness-evals Set up harness-evals for this project and create a first smoke eval.
+/harness-evals Interview me about what to evaluate, then set up the first focused eval for this project.
 ```
 
-The skill tells the agent to read these docs, check whether the CLI is installed, ask how to install it if missing, inspect the project, and translate your goals into harness config and eval cases.
+The skill tells the agent to read these docs, check whether the CLI is installed, ask how to install it if missing, inspect the project, and translate your goals into harness config and eval cases. Normal onboarding should start with what you want to test and how, not with a dummy case.
 
 ## CLI installation choices
 
@@ -59,24 +59,16 @@ yarn harness-evals --help
 
 When installed locally, run commands through the package runner or add package scripts for repeatable CI usage.
 
-## Manual CLI fast start
+## First validation run
 
-After the CLI is available, generate a starter config and smoke test:
+After your agent creates `harness-evals.yaml` and at least one goal-specific case, validate that setup with:
 
 ```bash
-harness-evals init
 harness-evals list
-harness-evals run --case starter-smoke --agents local-command
+harness-evals run --case <case-id> --agents <agent-name>
 ```
 
 If you installed locally, prefix those commands with the package runner, such as `npx harness-evals`.
-
-`init` creates:
-
-- `harness-evals.yaml`
-- `evals/tests/starter-smoke.yaml`
-
-It refuses to overwrite an existing config.
 
 ## Contributor setup from this repository
 
@@ -93,7 +85,7 @@ npx skills add harness-evals --skill harness-evals
 
 The config file name is fixed: `harness-evals.yaml`.
 
-Minimal starter shape:
+Minimal config shape:
 
 ```yaml
 version: 1
@@ -272,6 +264,8 @@ Supported forms:
 - `${env:NAME:-fallback}`
 
 Missing variables without a fallback become an empty string.
+
+For `llmJudge`, explicit `judge.provider`, `judge.model`, and `judge.apiKeyEnv` are optional only when a configured agent adapter supports headless `complete()` calls for automatic judge fallback.
 
 ## Safe credential handling
 

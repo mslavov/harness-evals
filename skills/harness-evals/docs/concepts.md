@@ -69,6 +69,7 @@ It is responsible for things like:
 - building the command to run for a step
 - mapping config into argv, env, and mounted config
 - parsing the agent output into structured events
+- optionally handling headless string-in/string-out completions for judge fallback
 - optionally installing MCP mocks for agents that support them
 
 Built-in adapters include:

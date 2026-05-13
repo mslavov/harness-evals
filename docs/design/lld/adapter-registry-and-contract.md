@@ -80,6 +80,7 @@ interface AgentAdapter {
   version?: string;
   getInstallRecipe?(input: AdapterInstallInput): Promise<AdapterInstallRecipe | undefined>;
   applyMcpMocks?(input: ApplyMcpMocksInput): Promise<ApplyMcpMocksResult>;
+  complete?(input: AgentCompletionInput): Promise<string>;
   prepareStep(input: AgentStepPrepareInput): Promise<AgentStepRunPlan>;
   parseEvents(input: AgentEventInput): Promise<AgentEventsSummary>;
 }
@@ -100,6 +101,13 @@ interface AdapterInstallInput {
   agentName: string;
   agent: ResolvedAgentConfig;
   docker: DockerConfig;
+}
+
+interface AgentCompletionInput {
+  projectRoot: string;
+  agentName: string;
+  agent: ResolvedAgentConfig;
+  input: string;
 }
 
 interface AgentStepPrepareInput {
@@ -243,7 +251,7 @@ The same `prepareStep` method handles one-shot test cases and each step in a mul
 | Unknown adapter name | Config load fails before matrix execution | Agent references name absent from registry | Add an adapter declaration or use a built-in adapter name |
 | Unintended built-in override | A built-in adapter behaves differently because a project adapter uses the same name | Registry metadata shows `source: project` for that adapter name | Rename the project adapter if override was accidental |
 | Module import fails | Config load fails with module path/package error | Dynamic import error | Fix module path, build the adapter module, or install the package |
-| Invalid adapter export | Config load fails with contract validation error | Missing `name`, `prepareStep`, or `parseEvents` | Export a valid adapter object |
+| Invalid adapter export | Config load fails with contract validation error | Missing `name`, `prepareStep`, or `parseEvents`, or non-function optional hooks | Export a valid adapter object |
 | Install recipe probe fails | Managed or ready image is rejected | Probe exit code mismatch | Fix adapter install commands or supply a ready image with required tools |
 | Event parsing fails | Step result contains adapter parse error | Adapter throws or returns invalid summary | Fix parser logic and preserve raw stdout/stderr output records |
 | Missing cost data | Cost rollup marks cost unavailable | Adapter summary omits `cost` | Add adapter extraction for the coding agent's reported session totals |

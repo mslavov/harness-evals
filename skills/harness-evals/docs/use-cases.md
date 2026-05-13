@@ -33,11 +33,13 @@ Use this when a bug, bad edit, or missed instruction should never recur.
 
 Recommended workflow:
 
-1. create a case in `evals/tests/` that reproduces the failure
-2. keep the prompt and workspace fixture as small as possible
-3. add assertions for the failure boundary
-4. group similar cases with `suite`
-5. rerun that suite after agent or prompt changes
+1. identify the real failure, session, transcript, or repeated workflow to preserve
+2. extract the smallest prompt sequence and workspace state that reproduces it
+3. create a case in `evals/tests/` for that scenario
+4. keep the prompt and workspace fixture as small as possible
+5. add assertions for the failure boundary
+6. group similar cases with `suite`
+7. rerun that suite after agent or prompt changes
 
 Common assertions for regression cases:
 
@@ -67,6 +69,25 @@ Then run:
 ```bash
 harness-evals run --suite regressions
 ```
+
+## Extract cases from existing workflows
+
+Use this when the user has already performed the workflow manually and wants the harness to preserve it.
+
+Good sources:
+
+- agent session logs or transcripts
+- bug reports with reproduction steps
+- PR review comments that describe missed behavior
+- repeated setup, migration, refactor, or verification workflows
+
+Extraction workflow:
+
+1. ask which session or workflow should become an eval
+2. identify the user-visible goal, starting workspace, and expected outcome
+3. split the workflow into one step for simple tasks or explicit `plan` / `implement` / `verify` steps for longer tasks
+4. choose deterministic assertions first, such as `workspaceDiff`, `contains`, `notContains`, `toolCalled`, `mockCalled`, or `noToolErrors`
+5. add `llmJudge` only when the outcome needs rubric-based quality scoring
 
 ## Validate repo-specific behavior
 

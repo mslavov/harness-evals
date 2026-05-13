@@ -158,15 +158,19 @@ interface JudgeResult {
 
 Judge defaults come from top-level `judge`. A judge assertion can override `provider`, `model`, `apiKeyEnv`, `temperature`, or `promptTemplate` for that assertion only. The assertion must provide its own `rubric`, `inputs`, and `threshold`.
 
+When explicit judge config is used, `provider`, `model`, and `apiKeyEnv` are required as a complete set after top-level defaults are applied. When no explicit provider/model/api key is configured, the runner falls back to the first configured agent whose adapter supports headless completion.
+
 ### Judge runtime contract
 
-The judge runtime uses `@mariozechner/pi-ai`:
+The explicit judge runtime uses `@mariozechner/pi-ai`:
 
 1. Resolve the configured `provider` and `model` through pi-ai model resolution.
 2. Build a pi-ai `Context` from the judge prompt and redacted input references.
 3. Call pi-ai completion with `apiKey` read from `apiKeyEnv` and supported generation options such as `temperature`.
 4. Parse the assistant text as `JudgeResult`.
 5. Record pi-ai response usage and cost in judge metadata.
+
+The adapter-backed judge fallback uses the first configured agent whose adapter exposes `complete(input): Promise<string>`. The adapter receives the full judge prompt as a single string and returns a string containing the same `JudgeResult` JSON shape.
 
 Judge pass semantics:
 
@@ -328,7 +332,7 @@ Rules:
 - Missing `required` means an assertion is required.
 - Test-case and step assertions define test-specific criteria.
 - `type: llmJudge` defines rubric-based LLM judging as an assertion.
-- `llmJudge` assertions run through `@mariozechner/pi-ai`.
+- Explicit `llmJudge` assertions run through `@mariozechner/pi-ai`; assertions without explicit judge config use the first configured adapter that supports headless completion.
 - `llmJudge` assertions require `threshold`.
 - Project-level `scoring` controls score-type weighting.
 - Supported metric score types are `latency`, `cost`, and `tokenUsage`.

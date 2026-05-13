@@ -33,15 +33,16 @@ Read `docs/index.md` first, then read the task or reference page relevant to the
    - Global: install from npm, then verify `harness-evals --help`.
    - Local: detect the package manager, add `harness-evals` as a dev dependency, then verify with the matching runner such as `npx harness-evals --help`, `pnpm exec harness-evals --help`, or `bunx harness-evals --help`.
 5. Inspect the project package manager, language, test commands, Docker usage, existing CI, and existing coding-agent configuration.
-6. If the active coding agent is unclear, ask which agent is being used.
-7. Ask what the user wants to achieve: compare agents, create a regression suite, validate project-specific behavior, mock external tools, score outputs, or improve failure triage.
-8. Translate that goal into harness capabilities: agents/adapters, suites and test cases, fixtures, mocks, assertions, judge/scoring settings, output reports, and Docker image mode.
+6. Interview before generating eval files. Ask one focused question at a time until you know what the user wants to test, how success should be judged, and whether the source should be a new scenario, an existing session/transcript, a real failure, or a repeated workflow.
+7. Do not create dummy smoke cases. Create only goal-specific cases tied to the user's stated evaluation objective.
+8. If the active coding agent is unclear, ask which agent is being used.
 9. Ask which additional agents should be evaluated, then map selected agents to built-in adapters when possible; create project adapters only when the user asks for unsupported agents.
-10. Create or update `harness-evals.yaml` with minimal config: `tests` discovery, selected `agents`, default file output, visualization defaults, judge defaults only when judge assertions are used, and scoring defaults.
-11. Leave `docker.image` unset unless the user already has a ready image.
-12. Create test cases under `evals/tests/` and mock fixtures under `evals/mocks/` only when needed.
-13. Run `harness-evals list` and a focused first `harness-evals run --case <id> --agents <agent>` validation, using the local package runner when the CLI was installed locally.
-14. Report created files, selected agents, test cases, validation results, and next commands.
+10. Translate the user's goal into harness capabilities: agents/adapters, suites and test cases, fixtures, mocks, assertions, judge/scoring settings, output reports, and Docker image mode.
+11. Create or update `harness-evals.yaml` with minimal config: `tests` discovery, selected `agents`, default file output, visualization defaults, explicit judge defaults only when the user chooses separate judge credentials, and scoring defaults.
+12. Leave `docker.image` unset unless the user already has a ready image.
+13. Create goal-specific test cases under `evals/tests/` and mock fixtures under `evals/mocks/` only when needed.
+14. Run `harness-evals list` and a focused first `harness-evals run --case <id> --agents <agent>` validation, using the local package runner when the CLI was installed locally.
+15. Report created files, selected agents, test cases, validation results, and next commands.
 
 ## Safety Rules
 

@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadHarnessConfig, writeStarterConfig } from '../src/config/load.js';
+import { loadHarnessConfig } from '../src/config/load.js';
 import { buildDockerArgs } from '../src/docker/args.js';
 import { piAdapter } from '../src/adapters/pi.js';
 import { redactionsFromValues, redactString } from '../src/redaction.js';
@@ -185,33 +185,6 @@ steps:
   expect(multi?.steps.map((step) => step.id)).toEqual(['plan', 'implement', 'polish']);
 });
 
-test('starter init writes final schema config and runnable smoke case', async () => {
-  const root = await tempRoot();
-  const configPath = join(root, 'harness-evals.yaml');
-
-  await writeStarterConfig(configPath);
-
-  const configText = await readFile(configPath, 'utf8');
-  const starterCaseText = await readFile(join(root, 'evals', 'tests', 'starter-smoke.yaml'), 'utf8');
-  const config = await loadHarnessConfig({ cwd: root });
-  const matrix = buildMatrix(config, {});
-
-  expect(configText).toContain('tests:\n  - evals/tests/**/*.yaml');
-  expect(configText).not.toContain('image:');
-  expect(configText).not.toContain('apiKey');
-  expect(config.agents['local-command']).toEqual({ adapter: 'command', command: 'echo', args: ['{{ prompt }}'] });
-  expect(config.output.providers).toEqual([{ type: 'file' }]);
-  expect(config.docker.envAllowlist).not.toContain('PI_EVAL_API_KEY');
-  expect(config.docker.envAllowlist).not.toContain('PI_EVAL_PROVIDER');
-  expect(config.visualization.formats).toEqual(['html', 'json', 'csv']);
-  expect(config.scoring.assertionPassRate).toEqual({ weight: 1 });
-  expect(starterCaseText).toContain('id: starter-smoke');
-  expect(config.testCases).toHaveLength(1);
-  expect(config.testCases[0].steps[0].assert.map((assertion) => assertion.type)).toEqual(['contains', 'workspaceDiff']);
-  expect(matrix).toHaveLength(1);
-  expect(matrix[0].agentName).toBe('local-command');
-});
-
 test('default llmJudge runtime dependency is declared', async () => {
   const root = join(import.meta.dir, '..');
   const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
@@ -250,8 +223,14 @@ test('packaged skill exposes public docs index and safe onboarding guidance', as
   expect(skill).not.toContain('L' + 'LD');
   expect(skill).not.toContain(['docs', 'lld'].join('/'));
   expect(skill).toContain('Ask one focused question at a time');
+  expect(skill).toContain('Create only goal-specific cases');
   expect(skill).toContain('Never write API keys, tokens, passwords, or secret values into repo files');
+  expect(skill).not.toContain('harness-evals init');
+  expect(skill).not.toContain('starter-smoke');
   for (const doc of publicDocs) expect(existsSync(join(docsDir, doc))).toBe(true);
+  const bundledDocsText = (await Promise.all(publicDocs.map((doc) => readFile(join(docsDir, doc), 'utf8')))).join('\n');
+  expect(bundledDocsText).not.toContain('harness-evals init');
+  expect(bundledDocsText).not.toContain('starter-smoke');
   expect(existsSync(join(docsDir, 'HDL.md'))).toBe(false);
   expect(existsSync(join(docsDir, 'lld'))).toBe(false);
 });
@@ -439,8 +418,8 @@ test('unknown config extension keys and assertion types fail during loading', as
       message: 'unsupported ref',
     },
     {
-      caseYaml: `id: bad-judge-defaults\nprompt: hi\nassert:\n  - type: llmJudge\n    threshold: 0.5\n    judge:\n      rubric: Score it.\n      inputs: [finalOutput]`,
-      message: 'requires judge.provider',
+      caseYaml: `id: bad-judge-defaults\nprompt: hi\nassert:\n  - type: llmJudge\n    threshold: 0.5\n    judge:\n      provider: test\n      rubric: Score it.\n      inputs: [finalOutput]`,
+      message: 'requires judge.model',
     },
   ];
 

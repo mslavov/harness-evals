@@ -1,9 +1,10 @@
+import { spawn } from 'node:child_process';
 import { access, chmod, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { expandTrustedPath, resolveProjectPath, resolveTrustedPath } from '../config/paths.js';
 import type { AgentEventsSummary, ToolCallSummary } from '../events/types.js';
-import { type AgentAdapter, type AgentStepPrepareInput, type AgentStepRunPlan } from './types.js';
+import { type AgentAdapter, type AgentCompletionInput, type AgentStepPrepareInput, type AgentStepRunPlan } from './types.js';
 
 interface PiSelection {
   provider?: string;
@@ -26,6 +27,7 @@ interface SettingsMetadata {
   generatedProjectSettings?: unknown;
 }
 
+const JUDGE_SYSTEM_PROMPT = 'You are a strict evaluation judge. Return only valid JSON.';
 const RESOURCE_FIELDS = new Set(['extensions', 'skills', 'prompts', 'themes']);
 const NON_LOCAL_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https:', 'ssh:'];
 const SECRET_CONFIG_FILES = ['auth.json', 'models.json', 'model-tiers.json'];
@@ -39,6 +41,23 @@ export const piAdapter: AgentAdapter = {
       commands: ['npm install -g @earendil-works/pi-coding-agent'],
       probes: [{ command: [input.agent.command ?? 'pi', '--version'] }],
       cacheKey: '@earendil-works/pi-coding-agent',
+    });
+  },
+  async complete(input: AgentCompletionInput): Promise<string> {
+    const selection = await resolvePiSelection(input.agent);
+    const argv = buildPiCompleteArgs({
+      command: input.agent.command ?? 'pi',
+      input: input.input,
+      selection,
+    });
+
+    return runPiPrompt({
+      command: argv[0],
+      args: argv.slice(1),
+      cwd: input.projectRoot,
+      env: buildPiCompleteEnv(input.agent),
+      agentName: input.agentName,
+      timeoutMs: input.agent.timeoutMs,
     });
   },
   async prepareStep(input: AgentStepPrepareInput): Promise<AgentStepRunPlan> {
@@ -227,6 +246,85 @@ function buildPiArgs(options: {
 
   args.push(...options.extraArgs, options.prompt);
   return args;
+}
+
+function buildPiCompleteArgs(options: {
+  command: string;
+  input: string;
+  selection: PiSelection;
+}): string[] {
+  const args = [
+    options.command,
+    '-p',
+    '--mode',
+    'text',
+    '--no-session',
+    '--no-context-files',
+    '--no-tools',
+    '--system-prompt',
+    JUDGE_SYSTEM_PROMPT,
+  ];
+
+  if (options.selection.provider) args.push('--provider', options.selection.provider);
+  if (options.selection.model) args.push('--model', options.selection.model);
+
+  args.push(options.input);
+  return args;
+}
+
+function buildPiCompleteEnv(agent: AgentStepPrepareInput['agent']): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const agentDir = agent.userConfigDirs?.[0];
+  if (agentDir) env.PI_CODING_AGENT_DIR = expandTrustedPath(agentDir);
+  return env;
+}
+
+async function runPiPrompt(options: {
+  command: string;
+  args: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  agentName: string;
+  timeoutMs?: number;
+}): Promise<string> {
+  const child = spawn(options.command, options.args, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  let timedOut = false;
+
+  child.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+  child.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+  const timeout = options.timeoutMs ? setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGTERM');
+  }, options.timeoutMs) : undefined;
+
+  const { exitCode, spawnError } = await waitForPiPrompt(child);
+  if (timeout) clearTimeout(timeout);
+
+  const stdout = Buffer.concat(stdoutChunks).toString('utf8').trim();
+  const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+
+  if (spawnError) throw new Error(`Agent ${options.agentName} complete() failed to start ${options.command}: ${spawnError.message}`);
+  if (timedOut) throw new Error(`Agent ${options.agentName} complete() timed out after ${options.timeoutMs}ms`);
+  if (exitCode !== 0) throw new Error(`Agent ${options.agentName} complete() exited with code ${exitCode}${stderr ? `: ${stderr}` : ''}`);
+
+  return stdout;
+}
+
+function waitForPiPrompt(child: ReturnType<typeof spawn>): Promise<{ exitCode: number | null; spawnError?: Error }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result: { exitCode: number | null; spawnError?: Error }) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    child.on('error', (error) => settle({ exitCode: null, spawnError: error }));
+    child.on('close', (code) => settle({ exitCode: code }));
+  });
 }
 
 async function resolvePiSelection(agent: AgentStepPrepareInput['agent']): Promise<PiSelection> {

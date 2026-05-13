@@ -137,15 +137,14 @@ What to check:
 
 Common messages:
 
-- `llmJudge requires judge.provider or top-level judge.provider`
-- `llmJudge requires judge.model or top-level judge.model`
-- `llmJudge requires judge.apiKeyEnv or top-level judge.apiKeyEnv`
-- config-load errors saying a judge assertion requires top-level defaults
+- `llmJudge requires judge.provider/model/apiKeyEnv or a configured agent whose adapter supports complete()`
+- config-load errors saying a judge assertion requires `judge.provider`, `judge.model`, or `judge.apiKeyEnv` when explicit judge config is used
 
 Fixes:
 
 - define `provider`, `model`, and `apiKeyEnv` on each `llmJudge`, or
-- set them once in top-level `judge:` defaults
+- set them once in top-level `judge:` defaults, or
+- configure at least one agent whose adapter supports headless `complete()` calls for automatic judge fallback
 
 ### Judge credential env is not set
 
@@ -157,6 +156,18 @@ Fixes:
 
 - export the named environment variable before running harness-evals
 - make sure the `apiKeyEnv` name matches the variable you actually set
+
+### Adapter-backed judge fallback is unavailable
+
+Symptom:
+
+- `llmJudge requires judge.provider/model/apiKeyEnv or a configured agent whose adapter supports complete()`
+
+Fixes:
+
+- add explicit `judge.provider`, `judge.model`, and `judge.apiKeyEnv`, or
+- configure a judge-capable agent before the evaluated agents, or
+- update the selected project adapter to implement `complete(input): Promise<string>`
 
 ### Judge runtime dependency cannot load
 
