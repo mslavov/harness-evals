@@ -112,6 +112,14 @@ Managed images are:
 - re-probed when reused
 - rebuilt if a cached image no longer passes probes
 
+Use `--refresh-managed-image` when the install manifest is unchanged but upstream packages or the base image may have changed:
+
+```bash
+harness-evals run --refresh-managed-image
+```
+
+Refresh mode skips the cached-image reuse path, builds with Docker `--pull` and `--no-cache`, runs probes after the build, and records `cacheHit: false` in `image-resolution.json`. The flag does not rebuild or mutate a user-supplied ready image.
+
 You do not need a separate Docker build step in your project config.
 
 ## Environment allowlists

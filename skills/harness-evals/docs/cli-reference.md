@@ -28,6 +28,7 @@ Flags:
 - `--model <name>`: override the model for selected agents.
 - `--timeout-ms <n>`: override the per-run timeout.
 - `--image <ref>`: use a ready Docker image for all selected runs and skip managed image builds.
+- `--refresh-managed-image`: rebuild the selected managed image before running, using Docker `--pull` and `--no-cache`.
 
 Output:
 
@@ -49,6 +50,7 @@ Useful filters:
 - `--case <id>`
 - `--agents <a,b>`
 - `--image <ref>`
+- `--refresh-managed-image` (accepted for parity with `run`; it only annotates managed-image output)
 
 Output includes:
 
@@ -118,6 +120,7 @@ Managed image behavior:
 
 - The image is built from the install recipes required by the selected agents.
 - Cached images are probed before reuse; if a cached image fails probes, it is rebuilt.
+- Pass `--refresh-managed-image` to bypass cached-image reuse and rebuild the managed image with Docker `--pull` and `--no-cache`.
 - There is no separate Docker build workflow to run first.
 
 If you call the `docker` command directly, the CLI fails with guidance to use `run` and either let managed builds happen automatically or supply `docker.image` / `--image`.

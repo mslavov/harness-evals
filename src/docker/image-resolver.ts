@@ -18,6 +18,7 @@ export interface ImageResolutionInput {
   docker: DockerConfig;
   selectedAgents: ImageResolutionAgent[];
   adapterRegistry: AdapterRegistry;
+  refreshManagedImage?: boolean;
 }
 
 export interface InstallManifest {
@@ -75,7 +76,13 @@ const IMAGE_SCHEMA_VERSION = 1;
 const MANAGED_BASE_IMAGE = 'node:22-bookworm-slim';
 const MANAGED_TAG_PREFIX = 'harness-evals-managed';
 const IMAGE_CACHE_DIR = '.harness-evals/image-cache';
-const inFlightManagedResolutions = new Map<string, Promise<ImageResolutionResult>>();
+
+interface ManagedResolutionInFlight {
+  promise: Promise<ImageResolutionResult>;
+  refreshManagedImage: boolean;
+}
+
+const inFlightManagedResolutions = new Map<string, ManagedResolutionInFlight>();
 
 export class ImageResolutionError extends Error {
   constructor(message: string, readonly resolution?: ImageResolutionResult) {
@@ -91,18 +98,33 @@ export async function resolveDockerImage(input: ImageResolutionInput): Promise<I
   const manifest = buildInstallManifest(recipes);
   const cacheKey = computeCacheKey(manifest);
   const image = `${MANAGED_TAG_PREFIX}:${cacheKey}`;
+  const refreshManagedImage = input.refreshManagedImage ?? false;
   const existing = inFlightManagedResolutions.get(cacheKey);
   if (existing) {
-    const resolved = await existing;
-    return { ...resolved, cacheHit: true };
+    if (!refreshManagedImage || existing.refreshManagedImage) return existing.promise;
+
+    const resolution = (async () => {
+      try {
+        await existing.promise;
+      } catch {
+        // The refresh below performs its own build and probe.
+      }
+      return resolveManagedImage({ projectRoot: input.projectRoot, docker: input.docker, image, manifest, cacheKey, refreshManagedImage: true });
+    })();
+    inFlightManagedResolutions.set(cacheKey, { promise: resolution, refreshManagedImage: true });
+    try {
+      return await resolution;
+    } finally {
+      if (inFlightManagedResolutions.get(cacheKey)?.promise === resolution) inFlightManagedResolutions.delete(cacheKey);
+    }
   }
 
-  const resolution = resolveManagedImage({ projectRoot: input.projectRoot, docker: input.docker, image, manifest, cacheKey });
-  inFlightManagedResolutions.set(cacheKey, resolution);
+  const resolution = resolveManagedImage({ projectRoot: input.projectRoot, docker: input.docker, image, manifest, cacheKey, refreshManagedImage });
+  inFlightManagedResolutions.set(cacheKey, { promise: resolution, refreshManagedImage });
   try {
     return await resolution;
   } finally {
-    inFlightManagedResolutions.delete(cacheKey);
+    if (inFlightManagedResolutions.get(cacheKey)?.promise === resolution) inFlightManagedResolutions.delete(cacheKey);
   }
 }
 
@@ -125,23 +147,28 @@ async function resolveManagedImage(input: {
   image: string;
   manifest: InstallManifest;
   cacheKey: string;
+  refreshManagedImage?: boolean;
 }): Promise<ImageResolutionResult> {
-  const cacheHit = await imageExists(input.image, input.docker.timeoutMs);
-  if (cacheHit) {
-    const probes = await runProbes(input.image, collectProbes(input.manifest.recipes), input.docker.timeoutMs);
-    if (probes.every((probe) => probe.pass)) {
-      return {
-        mode: 'managed',
-        image: input.image,
-        manifest: input.manifest,
-        cacheKey: input.cacheKey,
-        cacheHit: true,
-        probes,
-      };
+  const refreshManagedImage = input.refreshManagedImage ?? false;
+  let cacheHit = false;
+  if (!refreshManagedImage) {
+    cacheHit = await imageExists(input.image, input.docker.timeoutMs);
+    if (cacheHit) {
+      const probes = await runProbes(input.image, collectProbes(input.manifest.recipes), input.docker.timeoutMs);
+      if (probes.every((probe) => probe.pass)) {
+        return {
+          mode: 'managed',
+          image: input.image,
+          manifest: input.manifest,
+          cacheKey: input.cacheKey,
+          cacheHit: true,
+          probes,
+        };
+      }
     }
   }
 
-  await buildManagedImage(input.projectRoot, input.image, input.manifest, input.cacheKey, input.docker.timeoutMs, cacheHit);
+  await buildManagedImage(input.projectRoot, input.image, input.manifest, input.cacheKey, input.docker.timeoutMs, cacheHit, refreshManagedImage);
   const probes = await runProbes(input.image, collectProbes(input.manifest.recipes), input.docker.timeoutMs);
   const result: ImageResolutionResult = {
     mode: 'managed',
@@ -154,7 +181,7 @@ async function resolveManagedImage(input: {
   const failure = probes.find((probe) => !probe.pass);
   if (failure) {
     throw new ImageResolutionError(
-      `Managed Docker image ${input.image} failed probe ${formatCommand(failure.command)} (exit ${formatExitCode(failure.exitCode)}, expected ${failure.expectedExitCode}) after ${cacheHit ? 'cache rebuild' : 'build'}. Fix the adapter install recipe or supply docker.image with a ready image.`,
+      `Managed Docker image ${input.image} failed probe ${formatCommand(failure.command)} (exit ${formatExitCode(failure.exitCode)}, expected ${failure.expectedExitCode}) after ${refreshManagedImage ? 'refresh' : cacheHit ? 'cache rebuild' : 'build'}. Fix the adapter install recipe or supply docker.image with a ready image.`,
       result,
     );
   }
@@ -168,15 +195,19 @@ async function buildManagedImage(
   cacheKey: string,
   timeoutMs: number,
   rebuildingCacheHit: boolean,
+  refreshManagedImage: boolean,
 ): Promise<void> {
   const contextDir = join(projectRoot, IMAGE_CACHE_DIR, cacheKey);
   await mkdir(contextDir, { recursive: true });
   await writeFile(join(contextDir, 'Dockerfile'), renderDockerfile(manifest, cacheKey));
 
-  const result = await runDockerCommand(['build', '-t', image, contextDir], timeoutMs);
+  const args = refreshManagedImage
+    ? ['build', '--pull', '--no-cache', '-t', image, contextDir]
+    : ['build', '-t', image, contextDir];
+  const result = await runDockerCommand(args, timeoutMs);
   if (result.exitCode !== 0 || result.errorMessage) {
     throw new ImageResolutionError(
-      `Managed Docker image build failed for ${image}${rebuildingCacheHit ? ' while rebuilding a failed cache hit' : ''}: ${result.errorMessage ?? firstOutputLine(result.stderr, result.stdout)}`,
+      `Managed Docker image build failed for ${image}${refreshManagedImage ? ' while refreshing' : rebuildingCacheHit ? ' while rebuilding a failed cache hit' : ''}: ${result.errorMessage ?? firstOutputLine(result.stderr, result.stdout)}`,
       { mode: 'managed', image, manifest, cacheKey, cacheHit: false, probes: [] },
     );
   }

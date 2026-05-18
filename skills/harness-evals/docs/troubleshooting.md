@@ -57,6 +57,20 @@ Fixes:
 - check the adapter install recipe or project dependencies the adapter expects
 - confirm Docker is installed and usable from your shell
 
+### Stale managed image after upstream package changes
+
+Symptom:
+
+- the managed image tag is reused because the install manifest is unchanged, but a globally installed package or the Docker base image has newer requirements
+
+Fix:
+
+```bash
+harness-evals run --refresh-managed-image
+```
+
+This rebuilds the managed image with Docker `--pull` and `--no-cache`, reruns probes, and records `cacheHit: false` in `image-resolution.json`.
+
 ## Unsupported adapters for MCP mocks
 
 Symptom:

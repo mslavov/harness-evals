@@ -34,7 +34,13 @@ async function main(): Promise<void> {
     console.log('\nCases:');
     for (const testCase of config.testCases) console.log(`  ${testCase.id}${testCase.suite ? ` [${testCase.suite}]` : ''}`);
     console.log(`\nMatrix entries: ${matrix.length}`);
-    console.log(`Runtime image: ${config.docker.image ? `ready (${config.docker.image})` : 'managed (built automatically during run)'}`);
+    const readyImage = parsed.dockerImage ?? config.docker.image;
+    const runtimeImage = readyImage
+      ? `ready (${readyImage})`
+      : parsed.refreshManagedImage
+        ? 'managed (will refresh before run)'
+        : 'managed (built automatically during run)';
+    console.log(`Runtime image: ${runtimeImage}`);
     return;
   }
 
@@ -64,6 +70,7 @@ async function main(): Promise<void> {
     model: parsed.model,
     timeoutMs: parsed.timeoutMs,
     dockerImage: parsed.dockerImage,
+    refreshManagedImage: parsed.refreshManagedImage,
   });
 
   printResults(result.results);
@@ -107,6 +114,9 @@ function parseArgs(argv: string[]): ParsedArgs {
         break;
       case '--image':
         parsed.dockerImage = readValue(argv, arg);
+        break;
+      case '--refresh-managed-image':
+        parsed.refreshManagedImage = true;
         break;
       case '--run':
         parsed.runId = readValue(argv, arg);
@@ -317,8 +327,9 @@ Commands:
 Run flags:
   --provider name     Override provider for selected agents
   --model name        Override model for selected agents
-  --timeout-ms n      Override per-run timeout
-  --image ref         Use a ready Docker image and skip managed builds
+  --timeout-ms n              Override per-run timeout
+  --image ref                 Use a ready Docker image and skip managed builds
+  --refresh-managed-image     Rebuild managed Docker image with --pull and --no-cache
 `);
 }
 

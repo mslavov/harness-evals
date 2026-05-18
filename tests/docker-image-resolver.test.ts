@@ -56,6 +56,94 @@ test('managed image mode builds once per manifest key and reuses a passing cache
   expect(commands.filter((args) => args[0] === 'run' && args.includes('probe-ok'))).toHaveLength(2);
 });
 
+test('refreshing an existing managed image rebuilds with pull and no cache', async () => {
+  const root = await tempRoot();
+  restores.push(await installFakeDocker(root));
+  const registry = await createAdapterRegistry({ projectRoot: root, declarations: {}, builtIns: [createProbeAdapter('probe-ok')] });
+  const input = {
+    projectRoot: root,
+    docker: dockerConfig(),
+    selectedAgents: [{ agentName: 'agent', agent: { adapter: 'probe' } }],
+    adapterRegistry: registry,
+  };
+
+  const first = await resolveDockerImage(input);
+  const refreshed = await resolveDockerImage({ ...input, refreshManagedImage: true });
+
+  expect(refreshed.mode).toBe('managed');
+  expect(refreshed.cacheHit).toBe(false);
+  expect(refreshed.cacheKey).toBe(first.cacheKey);
+  expect(refreshed.image).toBe(first.image);
+  const builds = (await readDockerLog(root)).filter((args) => args[0] === 'build');
+  expect(builds).toHaveLength(2);
+  expect(builds[1]).toContain('--pull');
+  expect(builds[1]).toContain('--no-cache');
+});
+
+test('refresh skips the cached managed image probe before rebuild', async () => {
+  const root = await tempRoot();
+  restores.push(await installFakeDocker(root));
+  const registry = await createAdapterRegistry({ projectRoot: root, declarations: {}, builtIns: [createProbeAdapter('probe-ok')] });
+  const input = {
+    projectRoot: root,
+    docker: dockerConfig(),
+    selectedAgents: [{ agentName: 'agent', agent: { adapter: 'probe' } }],
+    adapterRegistry: registry,
+  };
+
+  await resolveDockerImage(input);
+  await resolveDockerImage({ ...input, refreshManagedImage: true });
+
+  const commands = await readDockerLog(root);
+  expect(commands.filter((args) => args[0] === 'image' && args[1] === 'inspect')).toHaveLength(1);
+  expect(commands.filter((args) => args[0] === 'run' && args.includes('probe-ok'))).toHaveLength(2);
+});
+
+test('ready image with refresh remains probe-only and never builds', async () => {
+  const root = await tempRoot();
+  restores.push(await installFakeDocker(root));
+  const registry = await createAdapterRegistry({ projectRoot: root, declarations: {}, builtIns: [createProbeAdapter('probe-ok')] });
+
+  const result = await resolveDockerImage({
+    projectRoot: root,
+    docker: dockerConfig('ready-image'),
+    selectedAgents: [{ agentName: 'agent', agent: { adapter: 'probe' } }],
+    adapterRegistry: registry,
+    refreshManagedImage: true,
+  });
+
+  expect(result.mode).toBe('ready');
+  expect(result.image).toBe('ready-image');
+  const commands = await readDockerLog(root);
+  expect(commands.filter((args) => args[0] === 'build')).toHaveLength(0);
+  expect(commands.filter((args) => args[0] === 'image' && args[1] === 'inspect')).toHaveLength(0);
+  expect(commands.filter((args) => args[0] === 'run' && args.includes('ready-image') && args.includes('probe-ok'))).toHaveLength(1);
+});
+
+test('concurrent refresh calls for the same managed manifest dedupe to one build', async () => {
+  const root = await tempRoot();
+  restores.push(await installFakeDocker(root));
+  const registry = await createAdapterRegistry({ projectRoot: root, declarations: {}, builtIns: [createProbeAdapter('probe-ok')] });
+  const input = {
+    projectRoot: root,
+    docker: dockerConfig(),
+    selectedAgents: [{ agentName: 'agent', agent: { adapter: 'probe' } }],
+    adapterRegistry: registry,
+    refreshManagedImage: true,
+  };
+
+  const [first, second] = await Promise.all([resolveDockerImage(input), resolveDockerImage(input)]);
+
+  expect(first.cacheHit).toBe(false);
+  expect(second.cacheHit).toBe(false);
+  expect(second.cacheKey).toBe(first.cacheKey);
+  expect(second.image).toBe(first.image);
+  const builds = (await readDockerLog(root)).filter((args) => args[0] === 'build');
+  expect(builds).toHaveLength(1);
+  expect(builds[0]).toContain('--pull');
+  expect(builds[0]).toContain('--no-cache');
+});
+
 test('managed image cache hit probe failure triggers one rebuild for the same key', async () => {
   const root = await tempRoot();
   restores.push(await installFakeDocker(root));

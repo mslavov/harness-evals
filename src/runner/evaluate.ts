@@ -8,7 +8,7 @@ import { loadHarnessConfig, type LoadHarnessConfigOptions } from '../config/load
 import type { CliOverrides, LoadedHarnessConfig, MatrixEntry, ProjectScoringConfig } from '../config/schema.js';
 import { buildCostSummary, buildStepCostReport, mergeCostReports, missingCostReport, type CostDimensions, type CostReportEntry } from '../cost/rollup.js';
 import type { CostSummary } from '../cost/types.js';
-import { ImageResolutionError, resolveDockerImage, type ImageResolutionAgent } from '../docker/image-resolver.js';
+import { ImageResolutionError, resolveDockerImage, type ImageResolutionAgent, type ImageResolutionResult } from '../docker/image-resolver.js';
 import { runInDocker } from '../docker/runner.js';
 import { redactJson, redactionsFromEnv, type Redaction } from '../redaction.js';
 import { copyWorkspace } from '../workspace/copy.js';
@@ -46,8 +46,30 @@ export async function runHarness(options: RunHarnessOptions = {}): Promise<Harne
   validateAdapterReferences(registry, matrix.map((entry) => entry.agent.adapter));
   const concurrency = options.concurrency ?? 1;
   const imageAgents = buildImageResolutionAgents(matrix);
+  let sharedImageResolution: Promise<ImageResolutionResult> | undefined;
+  const resolveSharedImage = options.refreshManagedImage && matrix.length > 0 && matrix.every((entry) => !entry.docker.image)
+    ? () => {
+      sharedImageResolution ??= resolveDockerImage({
+        projectRoot: config.projectRoot,
+        docker: matrix[0].docker,
+        selectedAgents: imageAgents,
+        adapterRegistry: registry,
+        refreshManagedImage: true,
+      });
+      return sharedImageResolution;
+    }
+    : undefined;
   const judgeRunner = options.judgeRunner ?? createConfiguredJudgeRunner({ config, registry });
-  const results = await mapConcurrent(matrix, concurrency, (entry) => runTestCase(config, entry, registry, outputRegistry, imageAgents, judgeRunner));
+  const results = await mapConcurrent(matrix, concurrency, (entry) => runTestCase(
+    config,
+    entry,
+    registry,
+    outputRegistry,
+    imageAgents,
+    judgeRunner,
+    options.refreshManagedImage,
+    resolveSharedImage,
+  ));
   const cost = buildHarnessCostSummary(results);
   const outputPath = await writeHarnessSummary(config, outputRegistry, registry, matrix, results, cost);
 
@@ -66,6 +88,8 @@ export async function runTestCase(
   outputRegistry?: OutputProviderRegistry,
   imageAgents?: ImageResolutionAgent[],
   judgeRunner?: JudgeRunner,
+  refreshManagedImage?: boolean,
+  resolveImage?: () => Promise<ImageResolutionResult>,
 ): Promise<TestRunResult> {
   const runDir = buildRunDir(config.artifactRoot, entry.testCase.id, entry.agentName);
   const runId = basename(runDir);
@@ -137,6 +161,8 @@ export async function runTestCase(
       adapterRegistry,
       dispatcher,
       imageAgents: imageAgents ?? [{ agentName: entry.agentName, agent: entry.agent }],
+      refreshManagedImage,
+      resolveImage,
     });
     const dockerImage = imageResolution.image;
 
@@ -1144,14 +1170,19 @@ async function resolveAndEmitImage(input: {
   adapterRegistry: AdapterRegistry;
   dispatcher: OutputDispatcher;
   imageAgents: ImageResolutionAgent[];
+  refreshManagedImage?: boolean;
+  resolveImage?: () => Promise<ImageResolutionResult>;
 }) {
   try {
-    const resolution = await resolveDockerImage({
-      projectRoot: input.config.projectRoot,
-      docker: input.entry.docker,
-      selectedAgents: input.imageAgents,
-      adapterRegistry: input.adapterRegistry,
-    });
+    const resolution = input.resolveImage
+      ? await input.resolveImage()
+      : await resolveDockerImage({
+        projectRoot: input.config.projectRoot,
+        docker: input.entry.docker,
+        selectedAgents: input.imageAgents,
+        adapterRegistry: input.adapterRegistry,
+        refreshManagedImage: input.refreshManagedImage,
+      });
     await input.dispatcher.emit({ type: 'image.resolution', payload: resolution });
     return resolution;
   } catch (error) {

@@ -682,6 +682,31 @@ test('file output provider honors visualization disabled, formats, and latest co
   expect(existsSync(join(noLatestOutputRoot, 'latest', 'results.json'))).toBe(false);
 });
 
+test('CLI list accepts refresh managed image flag', async () => {
+  const root = await tempRoot();
+  const cliPath = join(import.meta.dir, '..', 'src', 'cli.ts');
+  await mkdir(join(root, 'cases'));
+  await writeFile(join(root, 'harness-evals.yaml'), `
+version: 1
+agents:
+  a:
+    adapter: command
+    command: echo
+tests:
+  - cases/*.yaml
+`);
+  await writeFile(join(root, 'cases', 'case.yaml'), `
+id: cli-list
+prompt: hi
+assert: []
+`);
+
+  const listed = Bun.spawnSync(['bun', cliPath, 'list', '--refresh-managed-image', '--config', join(root, 'harness-evals.yaml')], { cwd: root });
+
+  expect(listed.exitCode).toBe(0);
+  expect(new TextDecoder().decode(listed.stdout)).toContain('Runtime image: managed (will refresh before run)');
+});
+
 test('CLI export honors enabled visualization formats', async () => {
   const root = await tempRoot();
   const cliPath = join(import.meta.dir, '..', 'src', 'cli.ts');

@@ -15,7 +15,7 @@ The image resolver chooses the Docker image used for every selected test-case/ag
 1. **Ready image:** The consumer supplies an image that already contains the required coding-agent CLIs and tools. The harness does not build or rebuild anything.
 2. **Managed image:** The harness builds a local image from a base image plus adapter-provided installation recipes, tags it with a deterministic cache key, reuses it while the manifest still matches, and rebuilds when selected providers/adapters require different installed tools.
 
-The image resolver does not know provider-specific installation details. Adapters produce install recipes and probes; the image resolver normalizes the recipes, computes the cache key, builds the local image, runs probes, and records image metadata. Harness-provided mock wrappers are staged by the mock resolver at runtime; adapters can add probes when their MCP mock integration requires a specific runtime such as `node`.
+The image resolver does not know provider-specific installation details. Adapters produce install recipes and probes; the image resolver normalizes the recipes, computes the cache key, builds the local image, runs probes, and records image metadata. Callers can explicitly refresh a managed image when upstream packages or the base image changed without changing the install manifest. Harness-provided mock wrappers are staged by the mock resolver at runtime; adapters can add probes when their MCP mock integration requires a specific runtime such as `node`.
 
 ## 2. Data Model / Contracts
 
@@ -51,6 +51,7 @@ interface ImageResolutionInput {
   docker: DockerConfig;
   selectedAgents: ResolvedAgentConfig[];
   adapterRegistry: AdapterRegistry;
+  refreshManagedImage?: boolean;
 }
 
 interface InstallManifest {
@@ -118,12 +119,14 @@ start
   -> collect selected adapter recipes
   -> normalize install manifest
   -> compute cache key
-  -> local image exists?
-       |-- yes -> run probes
-       |          |-- pass -> use cached image
-       |          `-- fail -> rebuild
-       `-- no  -> build
-  -> run probes
+  -> refresh requested?
+       |-- yes -> build with --pull --no-cache
+       `-- no  -> local image exists?
+                  |-- yes -> run probes
+                  |          |-- pass -> use cached image
+                  |          `-- fail -> rebuild
+                  `-- no  -> build
+  -> run probes after build when a build happened
   -> use managed image | fail
 ```
 
@@ -133,9 +136,10 @@ Rules:
 2. The cache key includes the internal base image, harness image schema version, adapter names, adapter versions, agent names, recipe commands, recipe probes, and recipe `cacheKey` values.
 3. Adding a selected provider/adapter changes the install manifest when that provider/adapter has a recipe, producing a different cache key.
 4. If a cached managed image exists but required probes fail, the resolver rebuilds that image once for the same key.
-5. Install commands run during image build and must not require runtime secrets.
-6. Mock wrapper runtime requirements are represented through adapter recipes or probes when the internal base image is insufficient.
-7. Probes run after build and before test-case execution.
+5. When refresh is requested, the resolver skips cached-image inspection and probe-before-build reuse, builds with Docker `--pull` and `--no-cache`, then reports `cacheHit: false`.
+6. Install commands run during image build and must not require runtime secrets.
+7. Mock wrapper runtime requirements are represented through adapter recipes or probes when the internal base image is insufficient.
+8. Probes run after build and before test-case execution.
 
 ## 4. Read Path / Write Path
 
@@ -153,7 +157,7 @@ Rules:
 2. Build the local Docker image with the deterministic managed tag.
 3. Emit image resolution metadata as an `image.resolution` record so every output provider can persist the run environment metadata.
 4. Let output providers persist the record.
-5. Reuse Docker’s local image cache for matching tags.
+5. Reuse Docker’s local image cache for matching tags unless managed-image refresh is requested.
 
 Image resolution metadata record:
 
@@ -184,6 +188,7 @@ Image resolution metadata record:
 | Probe fails after managed build | Image resolution fails | Probe exit code mismatch after rebuild | Fix install recipe or probe declaration |
 | Recipe requires secret | Build fails or risks secret leakage | Install command references secret env or config mount | Move secret usage to runtime config, not image build |
 | Cache key omits required install input | Cached image lacks newly required provider/tool | Probe fails or wrong CLI behavior | Include that input in adapter recipe `cacheKey`, commands, or probes |
+| Upstream package changed without manifest change | Cached managed image contains stale globally installed tools or old base image layers | Probe output or runtime version in `image-resolution.json` is stale | Run with `--refresh-managed-image` |
 | Docker daemon unavailable | Image resolution fails immediately | Docker command error | Start Docker or run in an environment with Docker access |
 
 ## 6. Trade-Offs Accepted
@@ -191,7 +196,7 @@ Image resolution metadata record:
 - `docker.image` is a ready-image override and always bypasses managed builds because it gives consumers full control.
 - Managed images are local Docker images, not published images.
 - The resolver builds one compatible image for the selected run matrix so repeated test cases do not reinstall tools.
-- Cache invalidation is manifest-driven rather than time-based.
+- Cache invalidation is manifest-driven rather than time-based; explicit refresh covers upstream changes outside the manifest.
 - Adapter recipes are trusted project-controlled commands because they run during Docker build.
 - Probes are required for adapters that install CLIs so ready images and cached managed images can be validated consistently.
 
@@ -204,6 +209,7 @@ Image resolution metadata record:
 - Managed image cache keys are derived from a normalized install manifest.
 - Adding a selected provider/adapter with a new install recipe invalidates the cache by changing the manifest key.
 - Ready images are probed but never rebuilt.
+- `--refresh-managed-image` only affects managed images and rebuilds the selected managed tag with Docker `--pull` and `--no-cache`.
 
 ### Open decisions
 

@@ -39,6 +39,12 @@ harness-evals view --open
 
 `harness-evals` runs coding agents in Docker. If `docker.image` is set, that ready image is used directly. Otherwise the harness builds and reuses a local managed image from the selected adapters' installation recipes.
 
+Refresh a managed image when upstream packages or the Docker base image changed but the install manifest did not:
+
+```bash
+harness-evals run --refresh-managed-image --case <case-id> --agents <agent-name>
+```
+
 ## Documentation
 
 Start with the bundled docs hub at [`skills/harness-evals/docs/index.md`](skills/harness-evals/docs/index.md), or jump to the [`installation and configuration guide`](skills/harness-evals/docs/installation-and-configuration.md) and [`CLI reference`](skills/harness-evals/docs/cli-reference.md).
