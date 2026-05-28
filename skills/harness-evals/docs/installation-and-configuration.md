@@ -114,7 +114,7 @@ Useful top-level sections:
 - `output`: output providers
 - `visualization`: html/json/csv report settings
 - `judge`: shared defaults for `llmJudge` assertions
-- `scoring`: weights for pass rate, judge score, latency, cost, token usage
+- `scoring`: weights for pass rate, judge score, verifier reward, latency, cost, token usage
 
 ## Config discovery
 
@@ -163,6 +163,7 @@ visualization:
 scoring:
   assertionPassRate: { weight: 1 }
   judgeScore: { weight: 1 }
+  verifierReward: { weight: 1 }
   latency: { weight: 0 }
   cost: { weight: 0 }
   tokenUsage: { weight: 0 }

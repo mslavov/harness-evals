@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { ConfigMount } from '../adapters/types.js';
+import type { NetworkPolicyConfig } from '../config/schema.js';
 
 export interface DockerArgsOptions {
   image: string;
@@ -11,6 +12,7 @@ export interface DockerArgsOptions {
   configMounts: ConfigMount[];
   envNames: string[];
   envValues?: Record<string, string>;
+  network?: NetworkPolicyConfig;
   argv: string[];
 }
 
@@ -30,6 +32,8 @@ export function buildDockerArgs(options: DockerArgsOptions): string[] {
     `HOME=${options.home}`,
   ];
 
+  args.push(...networkArgs(options.network));
+
   for (const mount of options.configMounts) {
     args.push('--mount', bindMount(mount.source, mount.target, mount.readonly));
   }
@@ -47,6 +51,12 @@ export function buildDockerArgs(options: DockerArgsOptions): string[] {
 
   args.push(options.image, ...options.argv);
   return args;
+}
+
+function networkArgs(network: NetworkPolicyConfig | undefined): string[] {
+  if (!network || network.mode === 'default') return [];
+  if (network.mode === 'none') return ['--network', 'none'];
+  return ['--network', 'bridge'];
 }
 
 export function bindMount(source: string, target: string, readonly: boolean): string {

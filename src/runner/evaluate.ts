@@ -23,9 +23,12 @@ import { createConfiguredJudgeRunner } from '../judge/configured.js';
 import type { JudgeRunner } from '../judge/types.js';
 import type { MockCallRecord } from '../mocks/types.js';
 import { buildScenarioScoreSummary, buildScoreSummary } from '../scoring/index.js';
+import { applyHiddenPatch, captureModelPatch } from '../verifier/patch.js';
+import { runVerifier, verifierSetupError } from '../verifier/run.js';
+import { shouldCaptureModelPatch, type HiddenPatchResult, type ModelPatchArtifact, type VerifierRunResult } from '../verifier/types.js';
 import { buildRunDir } from './artifacts.js';
 import { buildMatrix } from './matrix.js';
-import type { HarnessRunResult, ScenarioRunContext, ScenarioRunStatus, ScenarioStepResult, ScenarioStepStatus, TestRunResult } from './result.js';
+import type { HarnessRunResult, PassAtKSummary, ScenarioRunContext, ScenarioRunStatus, ScenarioStepResult, ScenarioStepStatus, TestRunResult } from './result.js';
 
 export interface RunHarnessOptions extends LoadHarnessConfigOptions, CliOverrides {
   adapters?: AgentAdapter[];
@@ -71,12 +74,14 @@ export async function runHarness(options: RunHarnessOptions = {}): Promise<Harne
     resolveSharedImage,
   ));
   const cost = buildHarnessCostSummary(results);
-  const outputPath = await writeHarnessSummary(config, outputRegistry, registry, matrix, results, cost);
+  const passAtK = buildPassAtKSummary(results);
+  const outputPath = await writeHarnessSummary(config, outputRegistry, registry, matrix, results, cost, passAtK);
 
   return {
     pass: results.every((result) => result.pass),
     results,
     cost,
+    passAtK,
     outputPath,
   };
 }
@@ -94,6 +99,7 @@ export async function runTestCase(
   const runDir = buildRunDir(config.artifactRoot, entry.testCase.id, entry.agentName);
   const runId = basename(runDir);
   const workspaceDir = join(runDir, 'workspace');
+  const baseWorkspaceDir = join(runDir, 'base-workspace');
   const configDir = join(runDir, 'config');
   const steps: ScenarioStepResult[] = [];
   let redactions: Redaction[] = [];
@@ -127,6 +133,9 @@ export async function runTestCase(
         scenarioId: entry.testCase.id,
         caseId: entry.testCase.id,
         agentName: entry.agentName,
+        attemptIndex: entry.attemptIndex,
+        attemptNumber: entry.attemptNumber,
+        attempts: entry.attempts,
         runDir,
         testCase: {
           id: entry.testCase.id,
@@ -168,6 +177,10 @@ export async function runTestCase(
 
     await mkdir(configDir, { recursive: true });
     await copyWorkspace(entry.workspace.fixture ?? entry.workspace.source, workspaceDir, { ignore: entry.workspace.ignore });
+    if (entry.testCase.verifier && shouldCaptureModelPatch(entry.testCase.verifier)) {
+      await copyWorkspace(workspaceDir, baseWorkspaceDir, { ignore: [] });
+      cleanupPaths.push(baseWorkspaceDir);
+    }
     const beforeSnapshot = await snapshotWorkspace(workspaceDir, entry.workspace.ignore);
 
     const context: ScenarioRunContext = {
@@ -223,11 +236,24 @@ export async function runTestCase(
     const workspace = diffWorkspace(beforeSnapshot, finalSnapshot);
     await dispatcher.emit({ type: 'workspace.diff', payload: workspace });
 
+    const verifierArtifacts = await runVerifierArtifacts({
+      entry,
+      dispatcher,
+      runDir,
+      baseWorkspaceDir,
+      workspaceDir,
+      configDir,
+      dockerImage,
+    });
+
     const result = buildTestRunResult({
       entry,
       context,
       steps,
       workspace,
+      verifier: verifierArtifacts.verifier,
+      modelPatch: verifierArtifacts.modelPatch,
+      hiddenPatch: verifierArtifacts.hiddenPatch,
       durationMs: Date.now() - runStartedAt,
       scoring: config.scoring,
       redactions,
@@ -248,7 +274,7 @@ export async function runTestCase(
     if (dispatcher) await persistErrorResult(config, dispatcher, result, currentStepId);
     return result;
   } finally {
-    await Promise.all(cleanupPaths.map((path) => rm(path, { force: true })));
+    await Promise.all(cleanupPaths.map((path) => rm(path, { recursive: true, force: true })));
   }
 }
 
@@ -792,29 +818,99 @@ function skipReasonForStep(result: ScenarioStepResult): string | undefined {
   }
 }
 
+async function runVerifierArtifacts(input: {
+  entry: MatrixEntry;
+  dispatcher: OutputDispatcher;
+  runDir: string;
+  baseWorkspaceDir: string;
+  workspaceDir: string;
+  configDir: string;
+  dockerImage: string;
+}): Promise<{ verifier?: VerifierRunResult; modelPatch?: ModelPatchArtifact; hiddenPatch?: HiddenPatchResult }> {
+  const verifierConfig = input.entry.testCase.verifier;
+  if (!verifierConfig) return {};
+
+  let modelPatch: ModelPatchArtifact | undefined;
+  let hiddenPatch: HiddenPatchResult | undefined;
+
+  if (shouldCaptureModelPatch(verifierConfig)) {
+    const captured = await captureModelPatch({
+      baseWorkspaceDir: input.baseWorkspaceDir,
+      workspaceDir: input.workspaceDir,
+      outputPath: join(input.runDir, 'model.patch'),
+    });
+    modelPatch = captured.artifact;
+    await input.dispatcher.emit({ type: 'workspace.modelPatch', payload: { ...modelPatch, content: captured.content } });
+  }
+
+  if (verifierConfig.hiddenPatch) {
+    hiddenPatch = await applyHiddenPatch(input.workspaceDir, verifierConfig.hiddenPatch);
+    await input.dispatcher.emit({ type: 'workspace.hiddenPatch', payload: hiddenPatch });
+    if (!hiddenPatch.applied) {
+      const verifier = verifierSetupError(hiddenPatch.error ?? 'Hidden patch failed to apply');
+      await input.dispatcher.emit({ type: 'verifier.completed', payload: verifier });
+      return { verifier, modelPatch, hiddenPatch };
+    }
+  }
+
+  await input.dispatcher.emit({
+    type: 'verifier.started',
+    payload: {
+      command: verifierConfig.command,
+      args: verifierConfig.args ?? [],
+      rewardFile: verifierConfig.rewardFile,
+      rewardFormat: verifierConfig.rewardFormat,
+      network: verifierConfig.network ?? { mode: 'none' },
+    },
+  });
+  const verifier = await runVerifier({
+    verifier: verifierConfig,
+    dockerImage: input.dockerImage,
+    workspaceDir: input.workspaceDir,
+    configDir: input.configDir,
+    workspace: input.entry.workspace,
+    docker: input.entry.docker,
+    caseId: input.entry.testCase.id,
+    agentName: input.entry.agentName,
+  });
+  if (verifier.command) await input.dispatcher.emit({ type: 'verifier.command', payload: verifier.command });
+  await input.dispatcher.emit({ type: 'verifier.stdout', payload: verifier.stdout });
+  await input.dispatcher.emit({ type: 'verifier.stderr', payload: verifier.stderr });
+  if (verifier.reward) await input.dispatcher.emit({ type: 'verifier.reward', payload: verifier.reward });
+  await input.dispatcher.emit({ type: 'verifier.completed', payload: verifier });
+
+  return { verifier, modelPatch, hiddenPatch };
+}
+
 function buildTestRunResult(input: {
   entry: MatrixEntry;
   context: ScenarioRunContext;
   steps: ScenarioStepResult[];
   workspace: ScenarioStepResult['workspace'];
+  verifier?: VerifierRunResult;
+  modelPatch?: ModelPatchArtifact;
+  hiddenPatch?: HiddenPatchResult;
   durationMs: number;
   scoring: ProjectScoringConfig;
   redactions: readonly Redaction[];
 }): TestRunResult {
-  const status = buildRunStatus(input.steps);
+  const status = buildRunStatus(input.steps, input.verifier);
   const assertions = input.steps.flatMap((step) => step.assertions);
   const events = combineStepEvents(input.steps);
-  const score = buildScenarioScoreSummary(input.scoring, input.steps);
+  const score = buildScenarioScoreSummary(input.scoring, input.steps, input.verifier);
   const cost = buildScenarioCostSummary(input.entry, input.context, input.steps);
   const mockCalls = input.steps.flatMap((step) => readMockCalls(step.metadata));
   const lastExecuted = [...input.steps].reverse().find((step) => step.status !== 'skipped');
-  const firstError = input.steps.find((step) => step.status === 'error' || step.status === 'timeout')?.error;
+  const firstError = input.steps.find((step) => step.status === 'error' || step.status === 'timeout')?.error ?? input.verifier?.error;
 
   return {
     caseId: input.entry.testCase.id,
     scenarioId: input.context.scenarioId,
     agentName: input.entry.agentName,
     runId: input.context.runId,
+    attemptIndex: input.entry.attemptIndex,
+    attemptNumber: input.entry.attemptNumber,
+    attempts: input.entry.attempts,
     status,
     pass: status === 'passed',
     exitCode: lastExecuted?.exitCode ?? null,
@@ -827,6 +923,9 @@ function buildTestRunResult(input: {
     events,
     cost,
     workspace: input.workspace,
+    verifier: input.verifier,
+    modelPatch: input.modelPatch,
+    hiddenPatch: input.hiddenPatch,
     error: firstError,
     metadata: redactJson({
       caseId: input.entry.testCase.id,
@@ -835,9 +934,19 @@ function buildTestRunResult(input: {
       runId: input.context.runId,
       runDir: input.context.runDir,
       status,
+      provider: input.entry.agent.provider,
+      model: input.entry.agent.model,
+      attempt: {
+        index: input.entry.attemptIndex,
+        number: input.entry.attemptNumber,
+        total: input.entry.attempts,
+      },
       score,
       cost,
       stepCount: input.steps.length,
+      verifier: input.verifier,
+      modelPatch: input.modelPatch,
+      hiddenPatch: input.hiddenPatch,
       mockCalls: {
         calls: mockCalls,
         summary: summarizeMockCalls(mockCalls),
@@ -888,6 +997,9 @@ function buildSetupErrorResult(
     scenarioId: entry.testCase.id,
     agentName: entry.agentName,
     runId,
+    attemptIndex: entry.attemptIndex,
+    attemptNumber: entry.attemptNumber,
+    attempts: entry.attempts,
     status: 'error',
     pass: false,
     exitCode: lastStep?.exitCode ?? null,
@@ -908,6 +1020,13 @@ function buildSetupErrorResult(
       runId,
       runDir,
       status: 'error',
+      provider: entry.agent.provider,
+      model: entry.agent.model,
+      attempt: {
+        index: entry.attemptIndex,
+        number: entry.attemptNumber,
+        total: entry.attempts,
+      },
       setupError: message,
       score,
       cost,
@@ -916,10 +1035,13 @@ function buildSetupErrorResult(
   };
 }
 
-function buildRunStatus(steps: ScenarioStepResult[]): ScenarioRunStatus {
+function buildRunStatus(steps: ScenarioStepResult[], verifier?: VerifierRunResult): ScenarioRunStatus {
   if (steps.length === 0) return 'error';
   if (steps.some((step) => step.status === 'error')) return 'error';
   if (steps.some((step) => step.status === 'timeout')) return 'timeout';
+  if (verifier?.status === 'error') return 'error';
+  if (verifier?.status === 'timeout') return 'timeout';
+  if (verifier && !verifier.pass) return 'failed';
   if (steps.every((step) => step.status === 'passed')) return 'passed';
   return 'failed';
 }
@@ -1019,6 +1141,70 @@ function buildHarnessCostSummary(results: TestRunResult[]): CostSummary {
   return buildCostSummary({ entries, metadata: { resultCount: results.length } });
 }
 
+function buildPassAtKSummary(results: TestRunResult[]): PassAtKSummary[] {
+  const groups = new Map<string, TestRunResult[]>();
+  for (const result of results) {
+    const key = [result.caseId, result.agentName, readString(result.metadata.provider), readString(result.metadata.model)].join('\0');
+    groups.set(key, [...(groups.get(key) ?? []), result]);
+  }
+
+  return [...groups.values()].map((group) => {
+    const ordered = [...group].sort((a, b) => a.attemptNumber - b.attemptNumber);
+    const first = ordered[0];
+    const eligibility = passAtKEligibility(ordered);
+    const successes = eligibility.eligible ? ordered.filter((result) => result.verifier?.reward?.primary === 1).length : 0;
+    const attempts = ordered.length;
+    return {
+      caseId: first.caseId,
+      scenarioId: first.scenarioId,
+      agentName: first.agentName,
+      provider: readString(first.metadata.provider),
+      model: readString(first.metadata.model),
+      attempts,
+      successes,
+      eligible: eligibility.eligible,
+      reason: eligibility.reason,
+      values: eligibility.eligible ? passAtKValues(attempts, successes) : {},
+    };
+  });
+}
+
+function passAtKEligibility(results: TestRunResult[]): { eligible: boolean; reason?: string } {
+  if (results.length <= 1) return { eligible: false, reason: 'pass@k requires multiple attempts' };
+  let rewardCount = 0;
+  for (const result of results) {
+    const reward = result.verifier?.reward;
+    if (!reward) continue;
+    rewardCount += 1;
+    const values = Object.values(reward.values);
+    if (values.length !== 1 || !reward.binary) return { eligible: false, reason: 'expected exactly one binary verifier reward per attempt' };
+  }
+  if (rewardCount === 0) return { eligible: false, reason: 'missing verifier rewards' };
+  return { eligible: true };
+}
+
+function passAtKValues(attempts: number, successes: number): Record<string, number> {
+  const values: Record<string, number> = {};
+  for (let k = 1; k <= attempts; k++) {
+    values[`pass@${k}`] = passAtK(attempts, successes, k);
+  }
+  return values;
+}
+
+function passAtK(attempts: number, successes: number, k: number): number {
+  if (successes <= 0) return 0;
+  if (attempts - successes < k) return 1;
+  let probabilityAllFail = 1;
+  for (let i = 0; i < k; i++) {
+    probabilityAllFail *= (attempts - successes - i) / (attempts - i);
+  }
+  return Math.round((1 - probabilityAllFail) * 1_000_000) / 1_000_000;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 interface VisualizationReportPayload {
   status: 'rendered';
   runId: string;
@@ -1066,6 +1252,7 @@ async function writeHarnessSummary(
   matrix: MatrixEntry[],
   results: TestRunResult[],
   cost: CostSummary,
+  passAtK: PassAtKSummary[],
 ): Promise<string> {
   const runId = `summary-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   const redactions = redactionsFromEnv(unique(matrix.flatMap((entry) => runRedactionEnvNames(config, entry, registry))));
@@ -1082,6 +1269,7 @@ async function writeHarnessSummary(
       pass,
       results,
       cost,
+      passAtK,
       providerFailures: dispatcher.providerFailures,
     },
   });
@@ -1126,6 +1314,9 @@ function buildRunSummary(result: TestRunResult, dispatcher: OutputDispatcher): R
     caseId: result.caseId,
     scenarioId: result.scenarioId,
     agentName: result.agentName,
+    attemptIndex: result.attemptIndex,
+    attemptNumber: result.attemptNumber,
+    attempts: result.attempts,
     status: result.status,
     pass: result.pass,
     exitCode: result.exitCode,
@@ -1134,6 +1325,9 @@ function buildRunSummary(result: TestRunResult, dispatcher: OutputDispatcher): R
     error: result.error,
     score: result.score,
     cost: result.cost,
+    verifier: result.verifier,
+    modelPatch: result.modelPatch,
+    hiddenPatch: result.hiddenPatch,
     steps: result.steps.map((step) => ({
       id: step.id,
       originalStepId: step.originalStepId,
@@ -1202,6 +1396,7 @@ function runRedactionEnvNames(config: LoadedHarnessConfig, entry: MatrixEntry, r
     ...entry.docker.envAllowlist,
     ...(entry.agent.envAllowlist ?? []),
     ...(entry.agent.env ?? []),
+    ...(entry.testCase.verifier?.env ?? []),
     ...entry.testCase.steps.flatMap((step) => step.env ?? []),
     entry.agent.apiKeyEnv,
     ...adapterAuthEnvNames(registry, entry.agent.adapter),

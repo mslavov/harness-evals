@@ -15,6 +15,7 @@ import type {
   JudgeDefaults,
   LoadedHarnessConfig,
   MockConfig,
+  NetworkPolicyConfig,
   OutputConfig,
   OutputProviderConfig,
   ProjectScoringConfig,
@@ -22,6 +23,8 @@ import type {
   TestCase,
   TestCaseMockConfig,
   TestCaseStepDefinition,
+  TestCaseVerifierConfig,
+  VerifierRewardFormat,
   VisualizationConfig,
   VisualizationFormat,
 } from './schema.js';
@@ -33,10 +36,12 @@ export interface LoadHarnessConfigOptions {
 
 const BUILT_IN_PROVIDER_TYPES = new Set(['file']);
 const VISUALIZATION_FORMATS = new Set<VisualizationFormat>(['html', 'json', 'csv']);
-const SCORING_TYPES = new Set<ScoreType>(['assertionPassRate', 'judgeScore', 'latency', 'cost', 'tokenUsage']);
+const SCORING_TYPES = new Set<ScoreType>(['assertionPassRate', 'judgeScore', 'verifierReward', 'latency', 'cost', 'tokenUsage']);
 const METRIC_SCORING_TYPES = new Set<ScoreType>(['latency', 'cost', 'tokenUsage']);
 const SCORE_TARGETS = new Set(['maximize', 'minimize']);
 const JUDGE_INPUT_REFS = new Set(['finalOutput', 'stdout', 'stderr', 'events', 'toolCalls', 'mockCalls', 'assertions', 'workspaceDiff', 'cost']);
+const VERIFIER_REWARD_FORMATS = new Set<VerifierRewardFormat>(['auto', 'json', 'text']);
+const NETWORK_POLICY_MODES = new Set<NetworkPolicyConfig['mode']>(['default', 'none', 'allowlist']);
 
 const ASSERTION_KEYS: Record<string, readonly string[]> = {
   exitCode: ['id', 'type', 'required', 'equals'],
@@ -363,6 +368,8 @@ function readTestCase(value: unknown, path: string): TestCase {
     agents: readAgentsSelection(value.agents),
     workspace: normalizeLegacyWorkspace(value.workspace, vars),
     mocks: readTestCaseMocks(value.mocks, 'mocks'),
+    verifier: readVerifierConfig(value.verifier, 'verifier'),
+    attempts: readOptionalPositiveInteger(value.attempts, 'attempts'),
     steps,
     timeoutMs,
     args: firstStep.args,
@@ -462,6 +469,70 @@ function readTestCaseMocks(value: unknown, field: string): TestCaseMockConfig | 
   };
 }
 
+function readVerifierConfig(value: unknown, field: string): TestCaseVerifierConfig | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) throw new Error(`${field} must be an object`);
+  assertKnownKeys(value, ['command', 'args', 'cwd', 'env', 'timeoutMs', 'rewardFile', 'rewardFormat', 'hiddenPatch', 'captureModelPatch', 'network'], field);
+  const command = readOptionalString(value.command, `${field}.command`);
+  if (!command) throw new Error(`${field}.command is required`);
+  const rewardFile = readRelativePath(value.rewardFile, `${field}.rewardFile`);
+  const hiddenPatch = readRelativePath(value.hiddenPatch, `${field}.hiddenPatch`);
+  const rewardFormat = readRewardFormat(value.rewardFormat, `${field}.rewardFormat`);
+
+  return {
+    command,
+    args: readOptionalStringArray(value.args, `${field}.args`),
+    cwd: readOptionalString(value.cwd, `${field}.cwd`),
+    env: readOptionalStringArray(value.env, `${field}.env`),
+    timeoutMs: readOptionalPositiveInteger(value.timeoutMs, `${field}.timeoutMs`),
+    rewardFile,
+    rewardFormat,
+    hiddenPatch,
+    captureModelPatch: readOptionalBoolean(value.captureModelPatch, `${field}.captureModelPatch`),
+    network: readNetworkPolicy(value.network, `${field}.network`),
+  };
+}
+
+function readRewardFormat(value: unknown, field: string): VerifierRewardFormat | undefined {
+  const format = readOptionalString(value, field);
+  if (!format) return undefined;
+  if (!VERIFIER_REWARD_FORMATS.has(format as VerifierRewardFormat)) throw new Error(`${field} must be one of: auto, json, text`);
+  return format as VerifierRewardFormat;
+}
+
+function readNetworkPolicy(value: unknown, field: string): NetworkPolicyConfig | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) throw new Error(`${field} must be an object`);
+  assertKnownKeys(value, ['mode', 'allow'], field);
+  const mode = readOptionalString(value.mode, `${field}.mode`);
+  if (!mode) throw new Error(`${field}.mode is required`);
+  if (!NETWORK_POLICY_MODES.has(mode as NetworkPolicyConfig['mode'])) throw new Error(`${field}.mode must be one of: default, none, allowlist`);
+  const allow = readNetworkAllowlist(value.allow, `${field}.allow`);
+  if (mode === 'allowlist' && (!allow || allow.length === 0)) throw new Error(`${field}.allow is required when mode is allowlist`);
+  if (mode !== 'allowlist' && allow) throw new Error(`${field}.allow is only valid when mode is allowlist`);
+  return allow ? { mode: mode as NetworkPolicyConfig['mode'], allow } : { mode: mode as NetworkPolicyConfig['mode'] };
+}
+
+function readNetworkAllowlist(value: unknown, field: string): string[] | undefined {
+  const allow = readOptionalStringArray(value, field);
+  if (!allow) return undefined;
+  return allow.map((entry, index) => {
+    const trimmed = entry.trim();
+    if (!trimmed) throw new Error(`${field}[${index}] must not be empty`);
+    if (/\s/.test(trimmed)) throw new Error(`${field}[${index}] must be a URL or host without whitespace`);
+    if (trimmed.includes('://')) {
+      try {
+        const url = new URL(trimmed);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('unsupported protocol');
+        return url.host;
+      } catch {
+        throw new Error(`${field}[${index}] must be a valid http(s) URL or host`);
+      }
+    }
+    return trimmed;
+  });
+}
+
 function normalizeLegacyWorkspace(value: unknown, vars: Record<string, unknown> | undefined): Partial<TestCase['workspace']> | undefined {
   const workspace = readOptionalRecord(value, 'workspace') as Partial<TestCase['workspace']> | undefined;
   const fixture = readOptionalString(vars?.fixture, 'vars.fixture');
@@ -476,6 +547,9 @@ function normalizeTestCase(testCase: TestCase, projectRoot: string, path: string
   const source = testCase.workspace?.source
     ? resolveProjectPath(projectRoot, testCase.workspace.source, `workspace.source in ${path}`)
     : undefined;
+  const hiddenPatch = testCase.verifier?.hiddenPatch
+    ? resolveProjectPath(projectRoot, testCase.verifier.hiddenPatch, `verifier.hiddenPatch in ${path}`)
+    : undefined;
 
   validateMockReferences(testCase.mocks, mocks.root, projectRoot, `mocks in ${path}`);
   for (const step of testCase.steps) {
@@ -485,6 +559,7 @@ function normalizeTestCase(testCase: TestCase, projectRoot: string, path: string
   return {
     ...testCase,
     workspace: testCase.workspace ? { ...testCase.workspace, source, fixture } : undefined,
+    verifier: testCase.verifier ? { ...testCase.verifier, hiddenPatch } : undefined,
   };
 }
 
@@ -659,6 +734,21 @@ function readOptionalNumber(value: unknown, field: string): number | undefined {
     if (Number.isFinite(parsed)) return parsed;
   }
   throw new Error(`${field} must be a number`);
+}
+
+function readOptionalPositiveInteger(value: unknown, field: string): number | undefined {
+  const parsed = readOptionalNumber(value, field);
+  if (parsed === undefined) return undefined;
+  if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${field} must be a positive integer`);
+  return parsed;
+}
+
+function readRelativePath(value: unknown, field: string): string | undefined {
+  const path = readOptionalString(value, field);
+  if (!path) return undefined;
+  if (isAbsolute(path) || path.startsWith('~')) throw new Error(`${field} must be project-relative`);
+  if (hasTraversalSegment(path)) throw new Error(`${field} may not contain path traversal: ${path}`);
+  return path;
 }
 
 function readOptionalBoolean(value: unknown, field: string): boolean | undefined {

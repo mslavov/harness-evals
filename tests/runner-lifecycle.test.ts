@@ -80,6 +80,152 @@ assert:
   }
 });
 
+test('post-agent verifier parses rewards and controls run status', async () => {
+  const root = await tempRoot();
+  const restoreDocker = await installFakeDocker(root);
+
+  try {
+    await writeHarnessProject(root, `
+id: verifier-reward
+prompt: Say OK and write a file.
+config:
+  script: |
+    const { writeFileSync } = require('node:fs');
+    writeFileSync('one-step.txt', 'done');
+    console.log('OK from one step');
+verifier:
+  command: node
+  args:
+    - -e
+    - |
+      const { readFileSync, writeFileSync } = require('node:fs');
+      const ok = readFileSync('one-step.txt', 'utf8') === 'done';
+      writeFileSync('reward.txt', ok ? '1' : '0');
+      console.log('verifier network=' + process.env.HARNESS_FAKE_DOCKER_NETWORK);
+  rewardFile: reward.txt
+  rewardFormat: text
+  network:
+    mode: none
+assert:
+  - type: contains
+    value: OK
+`);
+
+    const result = await runHarness({ cwd: root, adapters: [createLifecycleAdapter([])] });
+    const run = result.results[0];
+
+    expect(run.status).toBe('passed');
+    expect(run.pass).toBe(true);
+    expect(run.verifier?.status).toBe('passed');
+    expect(run.verifier?.reward).toMatchObject({ values: { reward: 1 }, primary: 1, binary: true });
+    expect(run.score.buckets.find((bucket) => bucket.type === 'verifierReward')?.score).toBe(1);
+    expect(JSON.parse(await readFile(join(run.runDir, 'verifier', 'reward.json'), 'utf8')).values.reward).toBe(1);
+    expect(JSON.parse(await readFile(join(run.runDir, 'verifier', 'command.redacted.json'), 'utf8')).network.mode).toBe('none');
+    expect(await readFile(join(run.runDir, 'verifier', 'stdout.log'), 'utf8')).toContain('verifier network=none');
+  } finally {
+    restoreDocker();
+  }
+});
+
+test('attempts expand runs and produce pass@k for binary verifier rewards', async () => {
+  const root = await tempRoot();
+  const restoreDocker = await installFakeDocker(root);
+
+  try {
+    await writeHarnessProject(root, `
+id: verifier-attempts
+attempts: 3
+prompt: Say OK.
+config:
+  script: |
+    console.log('OK');
+verifier:
+  command: node
+  args:
+    - -e
+    - |
+      require('node:fs').writeFileSync('reward.txt', '1');
+  rewardFile: reward.txt
+assert:
+  - type: contains
+    value: OK
+`);
+
+    const result = await runHarness({ cwd: root, adapters: [createLifecycleAdapter([])] });
+
+    expect(result.results).toHaveLength(3);
+    expect(result.results.map((run) => run.attemptNumber)).toEqual([1, 2, 3]);
+    expect(result.passAtK).toEqual([expect.objectContaining({
+      caseId: 'verifier-attempts',
+      agentName: 'lifecycle',
+      attempts: 3,
+      successes: 3,
+      eligible: true,
+      values: { 'pass@1': 1, 'pass@2': 1, 'pass@3': 1 },
+    })]);
+    expect(JSON.parse(await readFile(join(root, '.harness-evals', 'output', 'latest', 'results.json'), 'utf8')).summary.passAtK[0].values['pass@3']).toBe(1);
+  } finally {
+    restoreDocker();
+  }
+});
+
+test('hidden patch is applied after model.patch is captured for verifier runs', async () => {
+  const root = await tempRoot();
+  const restoreDocker = await installFakeDocker(root);
+
+  try {
+    await writeHarnessProject(root, `
+id: hidden-patch-verifier
+workspace:
+  fixture: fixture
+prompt: Produce an answer file.
+config:
+  script: |
+    const { writeFileSync } = require('node:fs');
+    writeFileSync('answer.txt', 'agent answer');
+    console.log('OK');
+verifier:
+  command: node
+  args:
+    - -e
+    - |
+      const { readFileSync, writeFileSync } = require('node:fs');
+      const ok = readFileSync('hidden.txt', 'utf8').trim() === 'secret';
+      writeFileSync('reward.json', JSON.stringify({ reward: ok ? 1 : 0 }));
+  rewardFile: reward.json
+  hiddenPatch: patches/hidden.patch
+  captureModelPatch: true
+assert:
+  - type: contains
+    value: OK
+`);
+    await mkdir(join(root, 'patches'), { recursive: true });
+    await writeFile(join(root, 'fixture', 'hidden.txt'), 'old\n');
+    await writeFile(join(root, 'patches', 'hidden.patch'), `diff --git a/hidden.txt b/hidden.txt
+--- a/hidden.txt
++++ b/hidden.txt
+@@ -1 +1 @@
+-old
++secret
+`);
+
+    const result = await runHarness({ cwd: root, adapters: [createLifecycleAdapter([])] });
+    const run = result.results[0];
+
+    expect(run.status).toBe('passed');
+    expect(run.workspace.added).toEqual(['answer.txt']);
+    expect(run.hiddenPatch?.applied).toBe(true);
+    expect(run.modelPatch?.empty).toBe(false);
+    expect(run.verifier?.reward?.values).toEqual({ reward: 1 });
+    const modelPatch = await readFile(join(run.runDir, 'model.patch'), 'utf8');
+    expect(modelPatch).toContain('answer.txt');
+    expect(modelPatch).not.toContain('secret');
+    expect(JSON.parse(await readFile(join(run.runDir, 'hidden-patch.json'), 'utf8')).applied).toBe(true);
+  } finally {
+    restoreDocker();
+  }
+});
+
 test('runner executes steps linearly with a shared workspace and adapter continuation', async () => {
   const root = await tempRoot();
   const restoreDocker = await installFakeDocker(root);
@@ -702,6 +848,11 @@ while (index < args.length) {
     continue;
   }
   if (arg === '--name' || arg === '--user') {
+    index += 2;
+    continue;
+  }
+  if (arg === '--network') {
+    env.HARNESS_FAKE_DOCKER_NETWORK = args[index + 1];
     index += 2;
     continue;
   }

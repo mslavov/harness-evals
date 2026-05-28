@@ -137,6 +137,7 @@ assert:
   await writeFile(join(root, 'evals', 'tests', 'checkout-refactor.yaml'), `
 id: checkout-refactor
 description: Refactor checkout flow across multiple prompts
+attempts: 2
 workspace:
   fixture: evals/fixtures/checkout
 agents:
@@ -144,6 +145,16 @@ agents:
 mocks:
   cli:
     jira-cli: jira-cloud-success
+verifier:
+  command: bun
+  args: [test]
+  rewardFile: evals/reward.txt
+  rewardFormat: text
+  hiddenPatch: evals/patches/hidden.patch
+  captureModelPatch: true
+  network:
+    mode: allowlist
+    allow: [registry.npmjs.org]
 steps:
   - id: plan
     prompt: Review the checkout module and propose a minimal refactor plan.
@@ -182,6 +193,16 @@ steps:
   expect(quick?.prompt).toBe('Say OK and do not edit files.');
   expect(multi?.workspace?.fixture).toBe(join(root, 'evals', 'fixtures', 'checkout'));
   expect(multi?.mocks?.cli).toEqual({ 'jira-cli': 'jira-cloud-success' });
+  expect(multi?.attempts).toBe(2);
+  expect(multi?.verifier).toMatchObject({
+    command: 'bun',
+    args: ['test'],
+    rewardFile: 'evals/reward.txt',
+    rewardFormat: 'text',
+    hiddenPatch: join(root, 'evals', 'patches', 'hidden.patch'),
+    captureModelPatch: true,
+    network: { mode: 'allowlist', allow: ['registry.npmjs.org'] },
+  });
   expect(multi?.steps.map((step) => step.id)).toEqual(['plan', 'implement', 'polish']);
 });
 
@@ -421,6 +442,22 @@ test('unknown config extension keys and assertion types fail during loading', as
       caseYaml: `id: bad-judge-defaults\nprompt: hi\nassert:\n  - type: llmJudge\n    threshold: 0.5\n    judge:\n      provider: test\n      rubric: Score it.\n      inputs: [finalOutput]`,
       message: 'requires judge.model',
     },
+    {
+      caseYaml: `id: bad-attempts\nprompt: hi\nattempts: 0\nassert: []`,
+      message: 'attempts must be a positive integer',
+    },
+    {
+      caseYaml: `id: bad-reward\nprompt: hi\nverifier:\n  command: bun\n  rewardFile: ../reward.txt\nassert: []`,
+      message: 'verifier.rewardFile may not contain path traversal',
+    },
+    {
+      caseYaml: `id: bad-hidden-patch\nprompt: hi\nverifier:\n  command: bun\n  hiddenPatch: /tmp/hidden.patch\nassert: []`,
+      message: 'verifier.hiddenPatch must be project-relative',
+    },
+    {
+      caseYaml: `id: bad-network\nprompt: hi\nverifier:\n  command: bun\n  network:\n    mode: tunnel\nassert: []`,
+      message: 'verifier.network.mode must be one of',
+    },
   ];
 
   for (const invalid of invalids) {
@@ -517,6 +554,25 @@ test('docker args include copied workspace and env allowlist', () => {
   expect(args).toContain('type=bind,source=/host/workspace,target=/workspace');
   expect(args).toContain('type=bind,source=/host/ro,target=/ro,readonly');
   expect(args).toContain('OPENAI_API_KEY');
+  expect(args.slice(-3)).toEqual(['image', 'echo', 'hi']);
+});
+
+test('docker args include network policy controls', () => {
+  const args = buildDockerArgs({
+    image: 'image',
+    containerName: 'case',
+    workdir: '/workspace',
+    home: '/home/harness',
+    workspaceMount: { source: '/host/workspace', target: '/workspace', readonly: false },
+    configMount: { source: '/host/config', target: '/agent-config', readonly: false },
+    configMounts: [],
+    envNames: [],
+    network: { mode: 'none' },
+    argv: ['echo', 'hi'],
+  });
+
+  expect(args).toContain('--network');
+  expect(args).toContain('none');
   expect(args.slice(-3)).toEqual(['image', 'echo', 'hi']);
 });
 

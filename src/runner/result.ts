@@ -4,6 +4,7 @@ import type { DockerCommandMetadata } from '../docker/runner.js';
 import type { CostReport, CostSummary } from '../cost/types.js';
 import type { AgentEventsSummary } from '../events/types.js';
 import type { ScoreSummary } from '../scoring/types.js';
+import type { HiddenPatchResult, ModelPatchArtifact, VerifierRunResult } from '../verifier/types.js';
 import type { WorkspaceDiff } from '../workspace/diff.js';
 
 export type ScenarioStepStatus = 'passed' | 'failed' | 'skipped' | 'timeout' | 'error';
@@ -48,6 +49,9 @@ export interface TestRunResult {
   scenarioId: string;
   agentName: string;
   runId: string;
+  attemptIndex: number;
+  attemptNumber: number;
+  attempts: number;
   status: ScenarioRunStatus;
   pass: boolean;
   exitCode: number | null;
@@ -60,6 +64,9 @@ export interface TestRunResult {
   events: AgentEventsSummary;
   cost: CostSummary;
   workspace: WorkspaceDiff;
+  verifier?: VerifierRunResult;
+  modelPatch?: ModelPatchArtifact;
+  hiddenPatch?: HiddenPatchResult;
   error?: string;
   metadata: Record<string, unknown>;
 }
@@ -68,5 +75,19 @@ export interface HarnessRunResult {
   pass: boolean;
   results: TestRunResult[];
   cost: CostSummary;
+  passAtK: PassAtKSummary[];
   outputPath: string;
+}
+
+export interface PassAtKSummary {
+  caseId: string;
+  scenarioId: string;
+  agentName: string;
+  provider?: string;
+  model?: string;
+  attempts: number;
+  successes: number;
+  eligible: boolean;
+  reason?: string;
+  values: Record<string, number>;
 }

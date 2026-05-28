@@ -7,6 +7,8 @@ export function buildMatrix(config: LoadedHarnessConfig, cli: CliOverrides = {})
 
   for (const testCase of selectedTests) {
     const agentNames = selectAgents(Object.keys(config.agents), testCase, cli);
+    const attempts = cli.attempts ?? testCase.attempts ?? 1;
+    if (!Number.isInteger(attempts) || attempts < 1) throw new Error('attempts must be a positive integer');
     for (const agentName of agentNames) {
       const baseAgent = config.agents[agentName];
       if (!baseAgent) throw new Error(`Unknown agent selected by ${testCase.id}: ${agentName}`);
@@ -14,7 +16,9 @@ export function buildMatrix(config: LoadedHarnessConfig, cli: CliOverrides = {})
       const agent = applyMergeOrder(baseAgent, testCase, agentName, cli);
       const workspace = mergeWorkspaceConfig(config.workspace, testCase.workspace);
       const docker = mergeDockerConfig(config.docker, cli.dockerImage ? { image: cli.dockerImage } : undefined);
-      entries.push({ testCase, agentName, agent, workspace, docker });
+      for (let attemptIndex = 0; attemptIndex < attempts; attemptIndex++) {
+        entries.push({ testCase, agentName, agent, workspace, docker, attemptIndex, attemptNumber: attemptIndex + 1, attempts });
+      }
     }
   }
 

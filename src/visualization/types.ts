@@ -23,6 +23,7 @@ export interface RunReportSummary {
   durationMs?: number;
   cost?: CostSummary;
   tokenUsage?: CostRollup;
+  passAtK?: unknown[];
 }
 
 export interface AgentReportColumn {
@@ -62,6 +63,7 @@ export interface TestCaseAgentDetails {
   logs?: ReportLogRef[];
   artifacts?: ReportArtifactRef[];
   assertions?: unknown[];
+  verifier?: unknown;
   error?: string;
 }
 

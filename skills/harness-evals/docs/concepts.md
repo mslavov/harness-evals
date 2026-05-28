@@ -19,6 +19,8 @@ A test case has an `id` and can also include:
 - `workspace`
 - `agents` selection and overrides
 - `mocks`
+- `verifier`
+- `attempts`
 - `timeoutMs`
 - one-step fields like `prompt` and `assert`
 - or an explicit `steps:` array for multi-step runs
@@ -113,6 +115,22 @@ Built-in assertion types include:
 
 Assertions are attached to steps. Required assertions default to `true` unless you set `required: false`.
 
+### Verifier
+
+A verifier is an optional post-agent command that runs after all agent steps finish.
+
+Use it for checks that are easier to express as code than as step assertions, including hidden tests. A verifier can parse a numeric `reward.txt` or `reward.json`, apply a hidden patch before running, and write verifier artifacts under the run directory.
+
+### Attempt
+
+An attempt is one repeated execution of the same case/agent/model combination.
+
+Set `attempts` on a case or pass `--attempts` to the CLI. When attempts have binary verifier rewards, harness-evals reports pass@k summaries.
+
+### Hidden patch and model patch
+
+When `verifier.hiddenPatch` is set, harness-evals captures `model.patch` from the agent-edited workspace first, then applies the hidden patch only inside the copied run workspace before the verifier runs.
+
 ### Mock
 
 A mock is a deterministic replacement for an external dependency.
@@ -170,6 +188,7 @@ Available score types:
 
 - `assertionPassRate`
 - `judgeScore`
+- `verifierReward`
 - `latency`
 - `cost`
 - `tokenUsage`
@@ -180,7 +199,7 @@ Each score type has a `weight`. Metric scores can also define:
 - `best`
 - `worst`
 
-By default only assertion pass rate and judge score are weighted; latency, cost, and token usage are present with weight `0`.
+By default assertion pass rate, judge score, and verifier reward are weighted when present; latency, cost, and token usage are present with weight `0`.
 
 ## How a run fits together
 
@@ -190,7 +209,7 @@ The loader reads `harness-evals.yaml`, applies defaults, discovers test case YAM
 
 ### 2) Build the execution matrix
 
-The harness expands selected test cases against selected agents.
+The harness expands selected test cases against selected agents and configured attempts.
 
 You can narrow the matrix with:
 
@@ -220,6 +239,8 @@ The adapter prepares the concrete command, env vars, parser, config mounts, and 
 
 After execution, the harness computes assertions, optional judge scores, summary metrics, and report artifacts.
 
+If a verifier is configured, it runs after agent steps and before the final run result is written. Verifier status and reward participate in run pass/fail and scoring.
+
 ## Practical mental model
 
 When authoring evals, think in this order:
@@ -229,7 +250,8 @@ When authoring evals, think in this order:
 3. Is this one turn or multiple steps?
 4. What needs to be mocked?
 5. Which assertions prove success?
-6. Which metrics matter for comparison?
+6. Do you need a post-agent verifier or hidden tests?
+7. Which metrics matter for comparison?
 
 ## Typical file layout
 

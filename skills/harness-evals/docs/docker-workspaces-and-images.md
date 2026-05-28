@@ -174,6 +174,26 @@ docker:
 
 Override `agent.cwd` only when an agent must start somewhere else inside the copied workspace.
 
+## Verifier network policy
+
+Agent steps use Docker's default network unless your Docker daemon or image changes it. Post-agent verifiers are stricter: when `verifier.network` is omitted, harness-evals runs the verifier with `--network none`.
+
+```yaml
+verifier:
+  command: bun
+  args: [test]
+  network:
+    mode: none
+```
+
+Supported verifier modes:
+
+- `none`: passes `--network none` to Docker.
+- `default`: leaves Docker networking at its default.
+- `allowlist`: uses Docker bridge networking and exposes `HARNESS_EVALS_NETWORK_ALLOWLIST` inside the verifier container as a comma-separated allowlist for verifier tooling or proxies.
+
+Prefer `none` for hidden tests and deterministic checks. Use `default` or `allowlist` only when the verifier intentionally needs network access.
+
 ## Practical setup patterns
 
 Use a ready image when:

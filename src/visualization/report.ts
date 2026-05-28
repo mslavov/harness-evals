@@ -39,6 +39,7 @@ export function buildRunReport(source: unknown, options: BuildRunReportOptions =
   const scores = results.map((result) => scoreValue(result.score)).filter((score): score is number => score !== undefined);
   const durationMs = sumDefined(results.map((result) => numberValue(result.durationMs)));
   const cost = readCostSummary(payload.cost) ?? readCostSummary(firstRecordWith(results, 'cost')?.cost);
+  const passAtK = Array.isArray(payload.passAtK) ? payload.passAtK : undefined;
 
   return {
     runId,
@@ -55,6 +56,7 @@ export function buildRunReport(source: unknown, options: BuildRunReportOptions =
       durationMs,
       cost,
       tokenUsage: cost?.rollup,
+      passAtK,
     },
     columns,
     rows,
@@ -106,6 +108,7 @@ function buildCell(result: Record<string, unknown>, include: ReportIncludeConfig
   const steps = Array.isArray(result.steps) ? result.steps.filter(isRecord) : [];
   const cost = readCostSummary(result.cost);
   const workspace = result.workspace ?? record(result.metadata).workspace;
+  const verifier = result.verifier ?? record(result.metadata).verifier;
   const toolCalls = arrayFrom(record(result.events).toolCalls).concat(steps.flatMap((step) => arrayFrom(record(step.events).toolCalls)));
   const mockCalls = arrayFrom(record(result.events).mockCalls).concat(arrayFrom(record(record(result.metadata).mockCalls).summary));
   const judgeResults = assertions.filter((assertion) => assertion.type === 'llmJudge' || assertion.judge !== undefined || assertion.rationale !== undefined);
@@ -129,6 +132,7 @@ function buildCell(result: Record<string, unknown>, include: ReportIncludeConfig
       error: stringValue(result.error),
       logs: include.logs ? logRefs(steps) : undefined,
       artifacts: artifactRefs(result),
+      verifier,
     },
   };
 }
@@ -215,6 +219,8 @@ function artifactRefs(result: Record<string, unknown>) {
   const refs = [];
   if (stringValue(result.runDir)) refs.push({ label: 'run directory', href: stringValue(result.runDir)! });
   if (result.workspace) refs.push({ label: 'workspace diff', href: 'workspace-diff.json' });
+  if (result.verifier) refs.push({ label: 'verifier result', href: 'verifier/result.json' });
+  if (result.modelPatch) refs.push({ label: 'model patch', href: 'model.patch' });
   return refs;
 }
 

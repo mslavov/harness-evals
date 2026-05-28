@@ -37,6 +37,14 @@ mocks:
   cli:
     jira-cli: jira-success
   strict: true
+attempts: 2
+verifier:
+  command: bun
+  args: [test]
+  rewardFile: reward.txt
+  hiddenPatch: evals/hidden/checkout.patch
+  network:
+    mode: none
 steps:
   - id: plan
     prompt: Review the checkout flow and propose a minimal refactor plan.
@@ -69,6 +77,8 @@ Supported top-level fields:
 - `workspace`: optional per-case workspace override.
 - `agents`: optional include/exclude/override selection.
 - `mocks`: optional case-level mock declarations.
+- `verifier`: optional post-agent verifier command and reward parser.
+- `attempts`: optional positive integer repeat count for this case.
 - `steps`: ordered multi-step scenario.
 - `timeoutMs`: default timeout for a generated single step.
 - `prompt`, `assert`, `args`, `env`, `config`, `parser`: shorthand for single-step cases.
@@ -104,6 +114,55 @@ Step-level overrides merge with the selected agent config:
 - `config` is shallow-merged over agent config
 
 If a required assertion fails, later steps are skipped.
+
+## Post-agent verifiers and hidden tests
+
+Use `verifier` when pass/fail depends on checks that should run after the agent finishes, such as hidden tests.
+
+```yaml
+verifier:
+  command: bun
+  args: [test, --runInBand]
+  rewardFile: reward.txt
+  rewardFormat: text
+  hiddenPatch: evals/hidden/my-case.patch
+  captureModelPatch: true
+  network:
+    mode: none
+```
+
+Verifier fields:
+
+- `command`: required command to run in the same Docker image as the agent.
+- `args`: optional command arguments.
+- `cwd`: optional working directory inside the container. Relative values are resolved under the workspace container path.
+- `env`: optional explicit environment variables to forward to the verifier.
+- `timeoutMs`: optional verifier timeout.
+- `rewardFile`: optional workspace-relative file produced by the verifier.
+- `rewardFormat`: `auto`, `text`, or `json`. Text rewards are parsed as `{ reward: number }`; JSON rewards must be a numeric reward map.
+- `hiddenPatch`: optional project-relative patch applied after agent changes are captured and before the verifier runs.
+- `captureModelPatch`: writes `model.patch` before hidden tests are applied.
+- `network`: verifier network policy. Omit it to run the verifier with `mode: none`.
+
+When a verifier is configured, the run passes only if the agent steps pass and the verifier passes. A numeric reward of `0` fails the verifier; a positive reward passes it.
+
+Hidden patches are applied to the copied run workspace, not your source repo. `model.patch` captures the agent changes before the hidden patch is applied, so hidden test content stays out of the model patch artifact.
+
+## Attempts and pass@k
+
+Set `attempts` on a case to repeat each selected case/agent/model combination:
+
+```yaml
+id: flaky-repair
+attempts: 5
+prompt: Fix the failing test.
+verifier:
+  command: bun
+  args: [test]
+  rewardFile: reward.txt
+```
+
+Pass@k is computed when repeated attempts have binary verifier rewards (`0` or `1`). Missing verifier rewards count as non-successes; non-binary reward maps make the pass@k group ineligible.
 
 ## Workspace and fixtures
 
@@ -227,5 +286,7 @@ For each run, harness-evals writes a run directory under `.harness-evals/runs/..
 - `steps/<step-id>/events-summary.json`
 - `steps/<step-id>/assertions.json`
 - `steps/<step-id>/step-completed.json`
+- `verifier/result.json`, `verifier/reward.json`, and verifier logs when a verifier is configured
+- `model.patch` and `hidden-patch.json` when hidden-test patching is configured
 
 Those files are useful when tightening assertions or debugging a flaky case.

@@ -66,6 +66,7 @@ async function main(): Promise<void> {
     caseId: parsed.caseId,
     suite: parsed.suite,
     concurrency: parsed.concurrency,
+    attempts: parsed.attempts,
     provider: parsed.provider,
     model: parsed.model,
     timeoutMs: parsed.timeoutMs,
@@ -102,6 +103,9 @@ function parseArgs(argv: string[]): ParsedArgs {
         break;
       case '--concurrency':
         parsed.concurrency = readPositiveInt(readValue(argv, arg), arg);
+        break;
+      case '--attempts':
+        parsed.attempts = readPositiveInt(readValue(argv, arg), arg);
         break;
       case '--provider':
         parsed.provider = readValue(argv, arg);
@@ -319,7 +323,7 @@ function printHelp(): void {
   console.log(`harness-evals
 
 Commands:
-  harness-evals run [--config path] [--suite name] [--case id] [--agents a,b] [--concurrency n]
+  harness-evals run [--config path] [--suite name] [--case id] [--agents a,b] [--concurrency n] [--attempts n]
   harness-evals list [--config path]
   harness-evals view [--config path] [--run id] [--latest] [--open] [--port n]
   harness-evals export [--config path] [--run id] --format html|json|csv --output path
@@ -327,6 +331,7 @@ Commands:
 Run flags:
   --provider name     Override provider for selected agents
   --model name        Override model for selected agents
+  --attempts n                Override attempt count for selected cases
   --timeout-ms n              Override per-run timeout
   --image ref                 Use a ready Docker image and skip managed builds
   --refresh-managed-image     Rebuild managed Docker image with --pull and --no-cache

@@ -27,6 +27,9 @@ Run status works like this:
 
 - any step `error` => run `error`
 - any step `timeout` => run `timeout`
+- verifier `error` => run `error`
+- verifier `timeout` => run `timeout`
+- verifier failed reward or non-zero exit => run `failed`
 - all steps `passed` => run `passed`
 - otherwise => run `failed`
 
@@ -101,6 +104,7 @@ Harness-evals computes a normalized score from weighted buckets:
 
 - `assertionPassRate`
 - `judgeScore`
+- `verifierReward`
 - `latency`
 - `cost`
 - `tokenUsage`
@@ -111,6 +115,7 @@ Default project weights are:
 scoring:
   assertionPassRate: { weight: 1 }
   judgeScore: { weight: 1 }
+  verifierReward: { weight: 1 }
   latency: { weight: 0 }
   cost: { weight: 0 }
   tokenUsage: { weight: 0 }
@@ -118,8 +123,7 @@ scoring:
 
 So by default:
 
-- non-judge assertion pass rate contributes 50%
-- average `llmJudge` score contributes 50%
+- non-judge assertion pass rate, average `llmJudge` score, and verifier reward each contribute when present
 - latency, cost, and token usage are reported but do not change the score
 
 Only buckets with `sourceCount > 0` and `weight > 0` are included in the weighted average.
@@ -128,7 +132,19 @@ Only buckets with `sourceCount > 0` and `weight > 0` are included in the weighte
 
 - `assertionPassRate`: passed non-judge assertions divided by total non-judge assertions
 - `judgeScore`: average of all `llmJudge` scores
+- `verifierReward`: average of numeric rewards emitted by the verifier, clamped to `0..1`
 - `latency`, `cost`, `tokenUsage`: normalized to the `0..1` range using `best`, `worst`, and `target`
+
+## Verifier rewards
+
+A verifier may write either:
+
+- `reward.txt`: a single number, parsed as `{ "reward": number }`
+- `reward.json`: a JSON object where every value is numeric
+
+For pass/fail, a configured reward passes when the primary reward is positive. The primary reward is the `reward` key when present, the only value for single-entry maps, or the average for multi-key maps.
+
+Pass@k is reported for repeated attempts with binary verifier rewards (`0` or `1`). Missing verifier results count as non-successes; non-binary reward maps make the pass@k group ineligible.
 
 Metric defaults are:
 

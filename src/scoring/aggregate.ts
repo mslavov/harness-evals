@@ -2,12 +2,14 @@ import type { AssertionResult } from '../assertions/types.js';
 import type { CostReport } from '../events/types.js';
 import { mergeCostReports, totalCostForScoring, totalTokensForScoring } from '../cost/rollup.js';
 import type { MetricScoreConfig, ProjectScoringConfig, ScoreTarget, ScoreType } from '../config/schema.js';
+import type { VerifierRunResult } from '../verifier/types.js';
 import type { ScoreBucketResult, ScoreSummary } from './types.js';
 
 interface ScoreAggregationInput {
   assertions: AssertionResult[];
   durationMs?: number;
   cost?: CostReport;
+  verifier?: VerifierRunResult;
 }
 
 interface ScenarioScoreStep {
@@ -27,6 +29,7 @@ export function buildScoreSummary(scoring: ProjectScoringConfig, input: ScoreAgg
   const buckets = [
     assertionPassRateBucket(scoring, input.assertions),
     judgeScoreBucket(scoring, input.assertions),
+    verifierRewardBucket(scoring, input.verifier),
     metricBucket(scoring, 'latency', input.durationMs),
     metricBucket(scoring, 'cost', totalCost(input.cost, input.assertions)),
     metricBucket(scoring, 'tokenUsage', totalTokens(input.cost, input.assertions)),
@@ -45,12 +48,13 @@ export function buildScoreSummary(scoring: ProjectScoringConfig, input: ScoreAgg
   };
 }
 
-export function buildScenarioScoreSummary(scoring: ProjectScoringConfig, steps: ScenarioScoreStep[]): ScoreSummary {
+export function buildScenarioScoreSummary(scoring: ProjectScoringConfig, steps: ScenarioScoreStep[], verifier?: VerifierRunResult): ScoreSummary {
   const executed = steps.filter((step) => step.status !== 'skipped');
   return buildScoreSummary(scoring, {
     assertions: executed.flatMap((step) => step.assertions),
     durationMs: executed.length > 0 ? executed.reduce((total, step) => total + step.durationMs, 0) : undefined,
     cost: mergeCostReports(executed.map((step) => step.events.cost)),
+    verifier,
   });
 }
 
@@ -81,6 +85,21 @@ function judgeScoreBucket(scoring: ProjectScoringConfig, assertions: AssertionRe
     sourceCount: judgeScores.length,
     reason: `Average judge score ${roundScore(average)}`,
     metadata: { scores: judgeScores },
+  };
+}
+
+function verifierRewardBucket(scoring: ProjectScoringConfig, verifier: VerifierRunResult | undefined): ScoreBucketResult | undefined {
+  const rewardValues = Object.values(verifier?.reward?.values ?? {}).filter((value) => Number.isFinite(value));
+  if (rewardValues.length === 0) return undefined;
+  const average = rewardValues.reduce((total, value) => total + value, 0) / rewardValues.length;
+  const score = roundScore(clamp(average));
+  return {
+    type: 'verifierReward',
+    score,
+    weight: weightFor(scoring, 'verifierReward'),
+    sourceCount: rewardValues.length,
+    reason: `Average verifier reward ${roundScore(average)}`,
+    metadata: { rewards: verifier?.reward?.values, primary: verifier?.reward?.primary, binary: verifier?.reward?.binary },
   };
 }
 

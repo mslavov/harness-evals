@@ -1,0 +1,925 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DeepSWE + Pier vs harness-evals framework comparison</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --card: #ffffff;
+      --ink: #172033;
+      --muted: #5e6b81;
+      --line: #dbe2ef;
+      --blue: #2563eb;
+      --blue-soft: #dbeafe;
+      --green: #15803d;
+      --green-soft: #dcfce7;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --red: #b91c1c;
+      --red-soft: #fee2e2;
+      --purple: #7c3aed;
+      --purple-soft: #ede9fe;
+      --gray-soft: #f1f5f9;
+      --shadow: 0 18px 50px rgba(20, 33, 61, 0.08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.16), transparent 34rem),
+        radial-gradient(circle at top right, rgba(124, 58, 237, 0.12), transparent 30rem),
+        var(--bg);
+      line-height: 1.55;
+    }
+
+    a { color: var(--blue); }
+
+    .page {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 40px 0 80px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 62%, #4338ca 100%);
+      color: white;
+      border-radius: 28px;
+      padding: 42px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero:after {
+      content: "";
+      position: absolute;
+      width: 420px;
+      height: 420px;
+      right: -160px;
+      top: -180px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.10);
+    }
+
+    .hero h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2.1rem, 4vw, 4rem);
+      line-height: 1.05;
+      max-width: 920px;
+      letter-spacing: -0.045em;
+    }
+
+    .hero p {
+      max-width: 880px;
+      margin: 0;
+      color: #dbeafe;
+      font-size: 1.12rem;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+      color: #e0e7ff;
+      font-size: 0.92rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid rgba(255,255,255,0.22);
+      background: rgba(255,255,255,0.10);
+      color: inherit;
+      padding: 6px 10px;
+      border-radius: 999px;
+      backdrop-filter: blur(6px);
+    }
+
+    .toc, section, .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .toc {
+      margin-top: 22px;
+      padding: 18px 22px;
+    }
+
+    .toc strong { display: block; margin-bottom: 8px; }
+    .toc a { margin-right: 16px; white-space: nowrap; }
+
+    section {
+      margin-top: 24px;
+      padding: 28px;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 1.85rem;
+      line-height: 1.15;
+      letter-spacing: -0.025em;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 1.2rem;
+      letter-spacing: -0.01em;
+    }
+
+    h4 { margin: 18px 0 8px; }
+
+    p { margin: 10px 0; }
+    .muted { color: var(--muted); }
+    .small { font-size: 0.9rem; }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    @media (max-width: 900px) {
+      .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
+      .hero { padding: 28px; }
+      section { padding: 22px; }
+    }
+
+    .stat {
+      padding: 18px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff, #f8fafc);
+    }
+
+    .stat b {
+      display: block;
+      font-size: 2rem;
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+    }
+
+    .stat span { color: var(--muted); font-size: 0.92rem; }
+
+    .callout {
+      border-radius: 16px;
+      padding: 16px 18px;
+      border: 1px solid;
+      margin: 16px 0;
+    }
+
+    .callout.blue { background: var(--blue-soft); border-color: #bfdbfe; }
+    .callout.green { background: var(--green-soft); border-color: #bbf7d0; }
+    .callout.amber { background: var(--amber-soft); border-color: #fde68a; }
+    .callout.red { background: var(--red-soft); border-color: #fecaca; }
+    .callout.purple { background: var(--purple-soft); border-color: #ddd6fe; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      font-weight: 700;
+      font-size: 0.78rem;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--gray-soft);
+      color: #334155;
+      margin-right: 6px;
+    }
+
+    .badge.blue { background: var(--blue-soft); color: #1d4ed8; }
+    .badge.green { background: var(--green-soft); color: var(--green); }
+    .badge.amber { background: var(--amber-soft); color: var(--amber); }
+    .badge.purple { background: var(--purple-soft); color: var(--purple); }
+    .badge.red { background: var(--red-soft); color: var(--red); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      background: white;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      vertical-align: top;
+      padding: 12px 13px;
+      text-align: left;
+    }
+
+    th {
+      background: #f8fafc;
+      font-size: 0.86rem;
+      text-transform: uppercase;
+      letter-spacing: 0.035em;
+      color: #334155;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+    th:last-child, td:last-child { border-right: 0; }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    code {
+      background: #eef2ff;
+      color: #312e81;
+      padding: 2px 5px;
+      border-radius: 6px;
+      font-size: 0.92em;
+    }
+
+    pre {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 14px;
+      overflow-x: auto;
+      line-height: 1.45;
+      font-size: 0.9rem;
+    }
+
+    .diagram {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(180deg, #fff, #f8fafc);
+      padding: 12px;
+      margin: 16px 0;
+    }
+
+    svg { max-width: 100%; height: auto; display: block; }
+    .svg-title { font: 700 17px ui-sans-serif, system-ui; fill: #111827; }
+    .svg-text { font: 13px ui-sans-serif, system-ui; fill: #1f2937; }
+    .svg-small { font: 11px ui-sans-serif, system-ui; fill: #475569; }
+    .svg-box { fill: #fff; stroke: #cbd5e1; stroke-width: 1.4; rx: 14; }
+    .svg-blue { fill: #eff6ff; stroke: #60a5fa; }
+    .svg-green { fill: #f0fdf4; stroke: #4ade80; }
+    .svg-purple { fill: #f5f3ff; stroke: #a78bfa; }
+    .svg-amber { fill: #fffbeb; stroke: #f59e0b; }
+    .svg-red { fill: #fef2f2; stroke: #f87171; }
+    .svg-line { stroke: #64748b; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+    .svg-dash { stroke: #94a3b8; stroke-width: 1.6; stroke-dasharray: 5 5; fill: none; marker-end: url(#arrow); }
+
+    .flow-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      counter-reset: flow;
+    }
+
+    .flow-list li {
+      counter-increment: flow;
+      position: relative;
+      padding: 12px 12px 12px 48px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      margin-bottom: 10px;
+      background: #fff;
+    }
+
+    .flow-list li:before {
+      content: counter(flow);
+      position: absolute;
+      left: 14px;
+      top: 12px;
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: var(--blue);
+      color: white;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .split-heading {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 10px;
+    }
+
+    .mini-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .mini-card h3 { margin-top: 0; }
+
+    .source-list li { margin-bottom: 8px; }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: #fff;
+      margin: 10px 0;
+    }
+
+    summary { cursor: pointer; font-weight: 700; }
+
+    .recommendation {
+      border-left: 5px solid var(--blue);
+      padding: 12px 16px;
+      background: #f8fafc;
+      border-radius: 12px;
+      margin: 10px 0;
+    }
+
+    @media print {
+      body { background: white; }
+      .page { width: 100%; padding: 0; }
+      .hero, section, .toc { box-shadow: none; }
+      .toc { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <h1>DeepSWE + Pier vs <code style="background:rgba(255,255,255,.16);color:white">harness-evals</code></h1>
+      <p>A framework-level comparison focused on how evaluation tasks are authored, isolated, executed, verified, scored, and reported.</p>
+      <div class="meta">
+        <span class="pill">Generated May 28, 2026</span>
+        <span class="pill">DeepSWE repo commit 2f0f412</span>
+        <span class="pill">Pier repo commit e01e8a8</span>
+        <span class="pill">harness-evals commit f0102c5</span>
+      </div>
+    </header>
+
+    <nav class="toc">
+      <strong>Contents</strong>
+      <a href="#executive-summary">Executive summary</a>
+      <a href="#sources">Sources</a>
+      <a href="#architectures">Architecture diagrams</a>
+      <a href="#deepswe-pier">DeepSWE + Pier mechanics</a>
+      <a href="#our-framework">Our framework mechanics</a>
+      <a href="#comparison">Side-by-side comparison</a>
+      <a href="#recommendations">Recommendations</a>
+    </nav>
+
+    <section id="executive-summary">
+      <h2>Executive summary</h2>
+      <div class="grid cols-4">
+        <div class="stat"><b>113</b><span>DeepSWE tasks inspected in the repo</span></div>
+        <div class="stat"><b>5</b><span>languages: TypeScript, Go, Python, JavaScript, Rust</span></div>
+        <div class="stat"><b>1/0</b><span>Pier/DeepSWE primary reward convention</span></div>
+        <div class="stat"><b>0..1</b><span>harness-evals weighted score range</span></div>
+      </div>
+
+      <div class="callout blue">
+        <strong>Core finding:</strong> DeepSWE/Pier and <code>harness-evals</code> optimize for different evaluation shapes. DeepSWE/Pier is strongest for benchmark-style, single-task code correctness with independent hidden program verifiers. <code>harness-evals</code> is strongest for project-specific agent workflow regression, multi-step prompts, tool/mocking assertions, LLM judges, and native CLI comparisons.
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>DeepSWE + Pier answer</th>
+            <th>harness-evals answer</th>
+            <th>Implication</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>What is a “test”?</td>
+            <td>A Harbor-format task directory with <code>instruction.md</code>, <code>task.toml</code>, <code>environment/</code>, <code>tests/</code>, and held-out <code>solution/</code>.</td>
+            <td>A YAML scenario/case, one or more prompt steps, optional fixture workspace, mocks, and assertions.</td>
+            <td>DeepSWE tasks are portable benchmark units; our cases are project-local behavioral workflows.</td>
+          </tr>
+          <tr>
+            <td>Who decides correctness?</td>
+            <td>An independent verifier script uploads hidden tests, applies a test patch, runs base and new tests, and writes a reward file.</td>
+            <td>The runner evaluates step assertions over exit code, output, tool calls, mocks, workspace diff, and optional LLM judges.</td>
+            <td>DeepSWE has stronger code-behavior verification out of the box; our framework has broader workflow observability.</td>
+          </tr>
+          <tr>
+            <td>How is score computed?</td>
+            <td>Verifier reward values are aggregated by job metrics such as mean/min/max/sum and pass@k when binary rewards are available.</td>
+            <td>Weighted score buckets: assertion pass rate, judge score, latency, cost, and token usage.</td>
+            <td>DeepSWE is benchmark-leaderboard oriented; our scoring is multi-objective and tunable per project.</td>
+          </tr>
+          <tr>
+            <td>How are agents run?</td>
+            <td>Pier runs trials through Docker or Modal environments, supports installed agents and mini-swe-agent, and records augmented ATIF trajectories.</td>
+            <td><code>harness-evals</code> runs selected adapters in Docker workspaces: command, Pi, Claude Code, Codex, Cursor, plus custom adapters.</td>
+            <td>Both support real CLI agents. Pier has benchmark-scale trial orchestration; our harness has agent-first project setup and mocks.</td>
+          </tr>
+          <tr>
+            <td>What should we borrow?</td>
+            <td>Independent verifier phase, reward files, pass@k attempts, model patch artifacts, flake checks, and prompt-verifier QA discipline.</td>
+            <td>Keep multi-step scenarios, strict mocks, LLM judge assertions, weighted score buckets, current-auth mounting, and report exports.</td>
+            <td>The best next step is adding a first-class post-agent verifier command/reward assertion to our framework.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="sources">
+      <h2>Sources and inspection method</h2>
+      <p>I used the three requested sources plus the local <code>harness-evals</code> codebase and docs. For GitHub repositories, I inspected the cloned repository contents created by the fetch process and recorded commit hashes above.</p>
+      <ul class="source-list">
+        <li><a href="https://deepswe.datacurve.ai/blog">DeepSWE blog</a> — benchmark design, methodology, QA, evaluation harness rationale, reported results.</li>
+        <li><a href="https://github.com/datacurve-ai/deep-swe">datacurve-ai/deep-swe</a> — task corpus, Harbor task layout, task metadata, verifier scripts, test patches, reference solutions.</li>
+        <li><a href="https://github.com/datacurve-ai/pier">datacurve-ai/pier</a> — runner, trial, verifier, metrics, task schema, network allowlist, installed-agent support.</li>
+        <li>Local workspace: <code>/Users/milkoslavov/workspace/harness-evals</code> — config schema, runner, assertions, scoring, mocks, Docker workspace handling, output/reporting docs.</li>
+      </ul>
+
+      <details>
+        <summary>Notable local files inspected</summary>
+        <ul>
+          <li><code>src/config/schema.ts</code> — test case, agent, workspace, mock, judge, scoring config schema.</li>
+          <li><code>src/runner/evaluate.ts</code> — matrix execution, Docker step lifecycle, assertions, scoring, run artifacts.</li>
+          <li><code>src/assertions/builtins.ts</code> — built-in assertion and <code>llmJudge</code> mechanics.</li>
+          <li><code>src/scoring/aggregate.ts</code> — weighted score bucket calculation.</li>
+          <li><code>skills/harness-evals/docs/*.md</code> — public authoring, scoring, mocks, Docker, and reporting docs.</li>
+          <li><code>/tmp/pi-github-repos/datacurve-ai/deep-swe/tasks/*</code> — 113 task directories and representative hidden-test patches.</li>
+          <li><code>/tmp/pi-github-repos/datacurve-ai/pier/src/pier/*</code> — task models, job/trial runner, verifier, metrics, pass@k.</li>
+        </ul>
+      </details>
+    </section>
+
+    <section id="architectures">
+      <h2>Architecture diagrams</h2>
+
+      <h3>1) DeepSWE task run through Pier</h3>
+      <div class="diagram">
+        <svg viewBox="0 0 1120 360" role="img" aria-label="DeepSWE Pier execution lifecycle">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+            </marker>
+          </defs>
+          <text x="20" y="30" class="svg-title">DeepSWE/Pier: benchmark task → sandboxed trial → hidden verifier reward</text>
+          <rect x="20" y="62" width="170" height="82" class="svg-box svg-blue" />
+          <text x="38" y="88" class="svg-text">Harbor task dir</text>
+          <text x="38" y="110" class="svg-small">task.toml, instruction,</text>
+          <text x="38" y="128" class="svg-small">environment, tests, solution</text>
+
+          <path d="M190 103 H245" class="svg-line" />
+          <rect x="250" y="62" width="170" height="82" class="svg-box svg-purple" />
+          <text x="270" y="88" class="svg-text">Pier Job</text>
+          <text x="270" y="110" class="svg-small">tasks × agents × attempts</text>
+          <text x="270" y="128" class="svg-small">resume + concurrency</text>
+
+          <path d="M420 103 H475" class="svg-line" />
+          <rect x="480" y="62" width="170" height="82" class="svg-box svg-amber" />
+          <text x="500" y="88" class="svg-text">Environment</text>
+          <text x="500" y="110" class="svg-small">Docker/Modal image</text>
+          <text x="500" y="128" class="svg-small">resources + no internet</text>
+
+          <path d="M650 103 H705" class="svg-line" />
+          <rect x="710" y="62" width="170" height="82" class="svg-box svg-green" />
+          <text x="730" y="88" class="svg-text">Agent run</text>
+          <text x="730" y="110" class="svg-small">mini-swe-agent or CLI</text>
+          <text x="730" y="128" class="svg-small">trajectory + logs</text>
+
+          <path d="M880 103 H935" class="svg-line" />
+          <rect x="940" y="62" width="160" height="82" class="svg-box svg-red" />
+          <text x="958" y="88" class="svg-text">Verifier</text>
+          <text x="958" y="110" class="svg-small">apply hidden tests</text>
+          <text x="958" y="128" class="svg-small">write reward file</text>
+
+          <path d="M1020 144 V195" class="svg-line" />
+          <rect x="840" y="205" width="260" height="104" class="svg-box" />
+          <text x="860" y="232" class="svg-text">Job aggregation</text>
+          <text x="860" y="254" class="svg-small">reward stats, mean/min/max/sum</text>
+          <text x="860" y="272" class="svg-small">binary pass@k when eligible</text>
+          <text x="860" y="290" class="svg-small">result.json + viewer + critiques</text>
+
+          <path d="M795 144 C795 185 725 185 725 225 H840" class="svg-dash" />
+          <text x="520" y="250" class="svg-small">agent output and trajectory feed artifacts, metrics, and optional post-hoc critique</text>
+        </svg>
+      </div>
+
+      <h3>2) harness-evals scenario run</h3>
+      <div class="diagram">
+        <svg viewBox="0 0 1120 360" role="img" aria-label="harness-evals execution lifecycle">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+            </marker>
+          </defs>
+          <text x="20" y="30" class="svg-title">harness-evals: YAML scenario → Docker step loop → assertions + weighted report</text>
+          <rect x="20" y="62" width="170" height="82" class="svg-box svg-blue" />
+          <text x="38" y="88" class="svg-text">harness-evals.yaml</text>
+          <text x="38" y="110" class="svg-small">agents, Docker, mocks,</text>
+          <text x="38" y="128" class="svg-small">scoring, visualization</text>
+
+          <path d="M190 103 H245" class="svg-line" />
+          <rect x="250" y="62" width="170" height="82" class="svg-box svg-purple" />
+          <text x="270" y="88" class="svg-text">Case YAML</text>
+          <text x="270" y="110" class="svg-small">prompt or steps[]</text>
+          <text x="270" y="128" class="svg-small">assertions + fixture</text>
+
+          <path d="M420 103 H475" class="svg-line" />
+          <rect x="480" y="62" width="170" height="82" class="svg-box svg-amber" />
+          <text x="500" y="88" class="svg-text">Matrix + workspace</text>
+          <text x="500" y="110" class="svg-small">cases × agents</text>
+          <text x="500" y="128" class="svg-small">copy workspace snapshot</text>
+
+          <path d="M650 103 H705" class="svg-line" />
+          <rect x="710" y="62" width="170" height="82" class="svg-box svg-green" />
+          <text x="730" y="88" class="svg-text">Step execution</text>
+          <text x="730" y="110" class="svg-small">adapter prepares CLI</text>
+          <text x="730" y="128" class="svg-small">Docker run + events</text>
+
+          <path d="M880 103 H935" class="svg-line" />
+          <rect x="940" y="62" width="160" height="82" class="svg-box svg-red" />
+          <text x="958" y="88" class="svg-text">Assertions</text>
+          <text x="958" y="110" class="svg-small">exit/output/tools/</text>
+          <text x="958" y="128" class="svg-small">mocks/diff/judge</text>
+
+          <path d="M1020 144 V195" class="svg-line" />
+          <rect x="800" y="205" width="300" height="104" class="svg-box" />
+          <text x="820" y="232" class="svg-text">Score + reports</text>
+          <text x="820" y="254" class="svg-small">weighted buckets: assertions, judge,</text>
+          <text x="820" y="272" class="svg-small">latency, cost, token usage</text>
+          <text x="820" y="290" class="svg-small">HTML/JSON/CSV + artifacts</text>
+
+          <path d="M795 144 C795 185 725 185 725 225 H800" class="svg-dash" />
+          <text x="518" y="250" class="svg-small">multi-step cases reuse the copied workspace and pass adapter continuation forward</text>
+        </svg>
+      </div>
+
+      <h3>3) Scoring and correctness decision points</h3>
+      <div class="diagram">
+        <svg viewBox="0 0 1120 430" role="img" aria-label="Scoring pipeline comparison">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+            </marker>
+          </defs>
+          <text x="20" y="32" class="svg-title">Where correctness becomes score</text>
+
+          <rect x="30" y="70" width="470" height="300" class="svg-box svg-blue" />
+          <text x="52" y="100" class="svg-text">DeepSWE/Pier path</text>
+          <rect x="62" y="126" width="180" height="58" class="svg-box" />
+          <text x="82" y="151" class="svg-small">Hidden behavioral tests</text>
+          <text x="82" y="169" class="svg-small">+ regression checks</text>
+          <path d="M242 155 H288" class="svg-line" />
+          <rect x="292" y="126" width="170" height="58" class="svg-box" />
+          <text x="312" y="151" class="svg-small">reward.txt/json</text>
+          <text x="312" y="169" class="svg-small">usually reward: 1 or 0</text>
+          <path d="M377 184 V226" class="svg-line" />
+          <rect x="168" y="232" width="210" height="74" class="svg-box" />
+          <text x="188" y="258" class="svg-small">Job stats + metrics</text>
+          <text x="188" y="276" class="svg-small">mean/min/max/sum</text>
+          <text x="188" y="294" class="svg-small">pass@k for binary attempts</text>
+
+          <rect x="620" y="70" width="470" height="300" class="svg-box svg-purple" />
+          <text x="642" y="100" class="svg-text">harness-evals path</text>
+          <rect x="650" y="126" width="178" height="58" class="svg-box" />
+          <text x="668" y="151" class="svg-small">Built-in assertions</text>
+          <text x="668" y="169" class="svg-small">output/tools/mocks/diff</text>
+          <path d="M828 155 H870" class="svg-line" />
+          <rect x="874" y="126" width="178" height="58" class="svg-box" />
+          <text x="892" y="151" class="svg-small">Optional LLM judges</text>
+          <text x="892" y="169" class="svg-small">rubric score 0..1</text>
+          <path d="M963 184 V226" class="svg-line" />
+          <rect x="768" y="232" width="230" height="92" class="svg-box" />
+          <text x="788" y="258" class="svg-small">Weighted score buckets</text>
+          <text x="788" y="276" class="svg-small">assertion pass rate + judge</text>
+          <text x="788" y="294" class="svg-small">latency/cost/tokens optional</text>
+          <text x="788" y="312" class="svg-small">run pass if all steps pass</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="deepswe-pier">
+      <h2>DeepSWE + Pier mechanics</h2>
+
+      <h3>DeepSWE corpus and task setup</h3>
+      <p>DeepSWE is a benchmark dataset of original long-horizon engineering tasks. The blog states that tasks span 91 active open-source repositories and five languages. The inspected repository contains 113 task directories with this language split:</p>
+      <div class="grid cols-5" style="grid-template-columns: repeat(5, minmax(0,1fr));">
+        <div class="stat"><b>35</b><span>TypeScript</span></div>
+        <div class="stat"><b>34</b><span>Go</span></div>
+        <div class="stat"><b>34</b><span>Python</span></div>
+        <div class="stat"><b>5</b><span>JavaScript</span></div>
+        <div class="stat"><b>5</b><span>Rust</span></div>
+      </div>
+      <p>Every inspected task had <code>allow_internet = false</code>, <code>agent.timeout_sec = 5400</code>, <code>verifier.timeout_sec = 1800</code>, a prebuilt Docker image, a repository URL, and an immutable base commit.</p>
+
+      <table>
+        <thead><tr><th>Task artifact</th><th>Role in the eval</th><th>Observed DeepSWE pattern</th></tr></thead>
+        <tbody>
+          <tr><td><code>task.toml</code></td><td>Metadata and runtime contract.</td><td>Contains task id/title/category/language/repo/base commit; verifier, agent, and environment limits; Docker image and internet policy.</td></tr>
+          <tr><td><code>instruction.md</code></td><td>Prompt shown to the agent.</td><td>Behavior-focused requirements. Internal helper names and implementation layout are usually left flexible.</td></tr>
+          <tr><td><code>environment/Dockerfile</code></td><td>Reproducible image fallback.</td><td>Clones upstream repo at the base commit and installs dependencies, e.g. <code>go mod download</code>.</td></tr>
+          <tr><td><code>tests/test.patch</code></td><td>Hidden verifier additions.</td><td>Adds behavioral challenge tests plus a repository-local <code>test.sh</code> with <code>base</code> and <code>new</code> modes.</td></tr>
+          <tr><td><code>tests/test.sh</code></td><td>Verifier entrypoint.</td><td>Captures model patch, resets test-touched files, applies <code>test.patch</code>, runs base/new tests, writes reward.</td></tr>
+          <tr><td><code>solution/</code></td><td>Reference solution.</td><td>Includes <code>solution.patch</code> and <code>solve.sh</code>; held out from grading and used for review/QA.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>DeepSWE verifier sequence</h3>
+      <ol class="flow-list">
+        <li><strong>Start in the task repo.</strong> The verifier expects the app at <code>/app</code> in the sandbox.</li>
+        <li><strong>Capture the model patch.</strong> It soft-resets to the base commit, stages the model changes, and writes <code>/logs/artifacts/model.patch</code>.</li>
+        <li><strong>Reset hidden-test files.</strong> Files touched by <code>/tests/test.patch</code> are restored to the base state before applying tests.</li>
+        <li><strong>Apply the hidden test patch.</strong> <code>git apply --whitespace=nowarn /tests/test.patch</code> injects verifier tests and a repository-local test script.</li>
+        <li><strong>Run regression and challenge modes.</strong> The generated <code>/app/test.sh base</code> checks selected existing tests; <code>/app/test.sh new</code> runs the new behavioral tests.</li>
+        <li><strong>Write scalar reward.</strong> The task writes <code>1</code> to <code>/logs/verifier/reward.txt</code> only when both modes pass; otherwise it writes <code>0</code>.</li>
+      </ol>
+
+      <div class="callout green">
+        <strong>Quality model:</strong> DeepSWE’s blog emphasizes prompt-verifier alignment, acceptance breadth across valid implementations, realism, environment cleanliness, flake checks during authoring, LLM-assisted analysis, and human review. This QA discipline is as important as the runner itself.
+      </div>
+
+      <h3>Pier runner mechanics</h3>
+      <p>Pier is the framework used to run Harbor-format tasks. It is a fork of Harbor with additions around installed CLI agents, air-gapped tasks, agent-specific network allowlists, augmented ATIF trajectory metadata, a trajectory viewer, and post-hoc critique jobs.</p>
+
+      <table>
+        <thead><tr><th>Pier component</th><th>Mechanics</th></tr></thead>
+        <tbody>
+          <tr><td>Job expansion</td><td><code>Job</code> resolves tasks from local datasets or explicit tasks, then expands <code>n_attempts × tasks × agents</code>. Concurrency defaults to four trials.</td></tr>
+          <tr><td>Trial lifecycle</td><td><code>Trial</code> starts environment, sets up agent, runs agent on the instruction, runs verifier, writes <code>result.json</code>, downloads logs/artifacts, and cleans up.</td></tr>
+          <tr><td>Environments</td><td>Docker and Modal are supported. Task config controls image, build timeout, CPU/memory/storage, OS, internet, MCP servers, health checks, workdir, and optional verifier environment.</td></tr>
+          <tr><td>Network isolation</td><td>When task internet is disabled, Pier can still provide filtered egress for installed agents via allowlisted provider/base URLs.</td></tr>
+          <tr><td>Verifier</td><td>Uploads <code>tests/</code> to the environment, runs discovered <code>test.sh</code> or <code>test.bat</code>, downloads verifier output, and parses <code>reward.txt</code> or <code>reward.json</code>.</td></tr>
+          <tr><td>Multi-step tasks</td><td>Pier supports configured <code>[[steps]]</code>, step instructions, step tests, step setup, step artifacts, per-step verifier results, min-reward gating, and mean/final reward strategies. The current DeepSWE repo has no <code>steps/</code> task directories.</td></tr>
+          <tr><td>Metrics</td><td>Default metric is mean. Pier also supports sum, min, max, reward distributions, exception stats, token/cost totals, and pass@k when each task attempt has a single binary reward.</td></tr>
+          <tr><td>Artifacts</td><td>Trials land under <code>jobs/&lt;job&gt;/&lt;trial&gt;/</code> with logs, agent trajectories, verifier output, artifacts, config, and result JSON.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>DeepSWE/Pier scoring</h3>
+      <p>The primary DeepSWE score is pass rate: a task trial passes when the verifier reward is <code>1</code>. Pier’s generic reward model is a dictionary of numeric rewards; job-level metrics aggregate those dictionaries.</p>
+      <ul>
+        <li><strong>Trial score:</strong> <code>VerifierResult(rewards={"reward": 1.0})</code> or <code>{"reward": 0.0}</code> for DeepSWE-style binary tasks.</li>
+        <li><strong>Job score:</strong> mean reward by agent/model/dataset unless other metrics are configured.</li>
+        <li><strong>Pass@k:</strong> computed when repeated attempts exist and each trial has exactly one binary reward.</li>
+        <li><strong>Failure accounting:</strong> exceptions are tracked separately from rewards; missing verifier results count as non-success for pass@k.</li>
+      </ul>
+    </section>
+
+    <section id="our-framework">
+      <h2>Our <code>harness-evals</code> mechanics</h2>
+
+      <h3>Test setup</h3>
+      <p><code>harness-evals</code> is configured by <code>harness-evals.yaml</code> and YAML test cases, usually under <code>evals/tests/**/*.yaml</code>. A one-step case can use top-level <code>prompt</code> and <code>assert</code>; multi-step cases use ordered <code>steps:</code>.</p>
+
+      <pre><code>id: checkout-refactor
+suite: regressions
+workspace:
+  fixture: evals/fixtures/checkout
+mocks:
+  cli:
+    jira-cli: jira-success
+steps:
+  - id: plan
+    prompt: Review the checkout flow and propose a minimal plan.
+    assert:
+      - type: contains
+        value: plan
+  - id: implement
+    prompt: Implement the approved change.
+    assert:
+      - type: exitCode
+        equals: 0
+      - type: workspaceDiff
+        minChanged: 1</code></pre>
+
+      <h3>Run lifecycle</h3>
+      <ol class="flow-list">
+        <li><strong>Load config and cases.</strong> Defaults are merged with project config; one-step cases normalize to a generated <code>run</code> step.</li>
+        <li><strong>Build matrix.</strong> Selected cases are crossed with selected agents, with case and CLI overrides applied.</li>
+        <li><strong>Resolve Docker image.</strong> A ready image is probed, or a managed image is built from selected adapter install recipes.</li>
+        <li><strong>Copy workspace.</strong> The source repo or fixture is copied into a run-local workspace; the original repo is not edited.</li>
+        <li><strong>Execute steps sequentially.</strong> Each step runs the selected adapter command inside Docker. Later steps share the same copied workspace and receive adapter continuation.</li>
+        <li><strong>Parse events and mock calls.</strong> Adapters parse stdout/stderr into structured events; CLI/MCP mocks record matched and unmatched calls.</li>
+        <li><strong>Evaluate assertions.</strong> Built-ins run first; <code>llmJudge</code> assertions run afterward with configured or adapter-backed judge models.</li>
+        <li><strong>Score and report.</strong> Step and scenario scores are calculated, artifacts are written, and latest HTML/JSON/CSV reports are rendered.</li>
+      </ol>
+
+      <h3>Assertion and pass/fail semantics</h3>
+      <table>
+        <thead><tr><th>Assertion type</th><th>What it checks</th><th>Best use</th></tr></thead>
+        <tbody>
+          <tr><td><code>exitCode</code></td><td>Agent process exit code.</td><td>Agent CLI/runtime health, or command-adapter baselines.</td></tr>
+          <tr><td><code>contains</code> / <code>notContains</code></td><td>Final step output text.</td><td>Output regressions and expected status messages.</td></tr>
+          <tr><td><code>toolCalled</code></td><td>Parsed agent tool-call events.</td><td>Workflow behavior, e.g. using read/edit tools.</td></tr>
+          <tr><td><code>mockCalled</code></td><td>Recorded CLI/MCP mock calls.</td><td>External integration contracts without touching real services.</td></tr>
+          <tr><td><code>noToolErrors</code></td><td>Tool-call error flags.</td><td>Detect bad tool usage.</td></tr>
+          <tr><td><code>workspaceDiff</code></td><td>Added/changed/deleted files relative to initial workspace snapshot.</td><td>File-level edit boundaries and focused regressions.</td></tr>
+          <tr><td><code>settingsDrivenSetup</code></td><td>Pi settings setup and lack of explicit extension flags.</td><td>Pi-specific setup policy.</td></tr>
+          <tr><td><code>llmJudge</code></td><td>Rubric-based score over selected inputs.</td><td>Quality, factuality, or implementation review that deterministic assertions cannot capture.</td></tr>
+        </tbody>
+      </table>
+
+      <p>A step passes only when all required assertions pass. A run is <code>passed</code> only when all steps pass; failures, timeouts, and errors cause later steps to be skipped.</p>
+
+      <h3>Scoring</h3>
+      <p><code>harness-evals</code> computes normalized weighted score buckets:</p>
+      <ul>
+        <li><strong>assertionPassRate:</strong> passed non-judge assertions divided by total non-judge assertions.</li>
+        <li><strong>judgeScore:</strong> average score from <code>llmJudge</code> assertions.</li>
+        <li><strong>latency:</strong> normalized duration, default minimize with worst 600,000 ms.</li>
+        <li><strong>cost:</strong> normalized cost, default minimize with worst 1 USD.</li>
+        <li><strong>tokenUsage:</strong> normalized token count, default minimize with worst 200,000 tokens.</li>
+      </ul>
+      <p>Default weights include assertion pass rate and judge score with weight <code>1</code> each; latency, cost, and token usage are reported with weight <code>0</code> unless the project opts in.</p>
+
+      <h3>Artifacts and reporting</h3>
+      <p>The file output provider writes per-run directories under <code>.harness-evals/runs/</code> and latest reports under <code>.harness-evals/output/latest/</code>. Per-step artifacts include stdout, stderr, command metadata, event summary, assertions, score, cost, mock calls, judge records, and step completion payloads.</p>
+
+      <div class="callout amber">
+        <strong>Important gap relative to Pier:</strong> <code>harness-evals</code> does not currently have a first-class independent post-agent verifier phase that runs hidden project tests and emits a reward file. It can ask the agent to run tests, inspect output, assert workspace diffs, and use LLM judges; those are not equivalent to a separate deterministic verifier.
+      </div>
+    </section>
+
+    <section id="comparison">
+      <h2>Side-by-side framework comparison</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Aspect</th>
+            <th>DeepSWE + Pier</th>
+            <th>harness-evals</th>
+            <th>Assessment for our eval framework</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Primary purpose</td>
+            <td>Public benchmark of frontier coding-agent capability on long-horizon software engineering tasks.</td>
+            <td>Reusable project-level harness for comparing real agent CLIs on workflows, regressions, and repo-specific tasks.</td>
+            <td>Different center of gravity: benchmark validity vs project regression/observability.</td>
+          </tr>
+          <tr>
+            <td>Evaluation unit</td>
+            <td>Immutable task directory pinned to external repo commit and prebuilt image.</td>
+            <td>YAML case with prompt steps, selected agents, fixture/source workspace, mocks, and assertions.</td>
+            <td>Our case format is easier to author inside a project; Pier format is more portable across benchmark runners.</td>
+          </tr>
+          <tr>
+            <td>Prompt style</td>
+            <td>Short, natural, behavior-oriented prompt; implementation details intentionally flexible.</td>
+            <td>User/project-defined prompts; can be one-step or explicit plan/implement/verify sequence.</td>
+            <td>Our framework supports more workflow shapes; DeepSWE’s prompt discipline is a useful authoring standard.</td>
+          </tr>
+          <tr>
+            <td>Workspace setup</td>
+            <td>Task image contains cloned upstream repo at base commit; task metadata pins exact commit.</td>
+            <td>Copies project source or case fixture into a run-local workspace and mounts it into Docker.</td>
+            <td>DeepSWE gives stronger external reproducibility. Our copied-fixture model is safer for local projects and leaves source untouched.</td>
+          </tr>
+          <tr>
+            <td>Agent runtime</td>
+            <td>mini-swe-agent for leaderboard standardization; Pier also runs native CLI agents.</td>
+            <td>Native CLI adapters are first-class: Pi, Claude Code, Codex, Cursor, command, and custom adapters.</td>
+            <td>Our harness is more native-agent oriented; Pier’s standard harness choice reduces leaderboard confounds.</td>
+          </tr>
+          <tr>
+            <td>Internet and dependencies</td>
+            <td>DeepSWE tasks disable task internet. Pier adds agent network allowlists so installed agents can still reach model endpoints.</td>
+            <td>Controls forwarded environment variables. Docker network isolation/allowlisting is not a first-class scoring feature.</td>
+            <td>Borrow Pier-style network policy for stronger isolation in high-stakes or benchmark-style cases.</td>
+          </tr>
+          <tr>
+            <td>Test setup</td>
+            <td>Hidden <code>test.patch</code> adds tests and a <code>test.sh</code>; verifier script applies patch at grading time.</td>
+            <td>Assertions are declared directly in case YAML; mocks and fixture files are also project-local.</td>
+            <td>Our assertions are transparent and fast to author. Hidden test patches are better for black-box code behavior evaluation.</td>
+          </tr>
+          <tr>
+            <td>Verification independence</td>
+            <td>Verifier runs after the agent, separate from the agent’s self-verification behavior.</td>
+            <td>Assertions evaluate captured run state. The agent may run tests, but the harness itself does not run a separate project verifier by default.</td>
+            <td>This is the biggest correctness gap if we want DeepSWE-like code-benchmark confidence.</td>
+          </tr>
+          <tr>
+            <td>Behavior vs implementation</td>
+            <td>DeepSWE explicitly designs tests around observable behavior and public APIs.</td>
+            <td><code>workspaceDiff</code> can enforce exact files, which is useful for workflow regressions but can become implementation-shape-sensitive.</td>
+            <td>Use exact diffs sparingly for correctness. Add behavior-verifier support for broader acceptance.</td>
+          </tr>
+          <tr>
+            <td>Regression protection</td>
+            <td>Verifier runs selected baseline tests plus challenge tests; patch breaking unrelated behavior fails.</td>
+            <td>Regression protection depends on authored assertions, mocks, and optional prompts asking the agent to run checks.</td>
+            <td>Our framework should support a first-class <code>verify</code> command/assertion to run baseline and challenge tests after edits.</td>
+          </tr>
+          <tr>
+            <td>Scoring model</td>
+            <td>Reward dictionary; default mean; binary pass rate and pass@k for repeated attempts.</td>
+            <td>Weighted 0..1 score buckets across assertions, judges, latency, cost, and tokens.</td>
+            <td>Our scoring is richer for tradeoffs. Add pass@k and reward-file compatibility for benchmark-style runs.</td>
+          </tr>
+          <tr>
+            <td>Multi-step evals</td>
+            <td>Pier supports them; current DeepSWE corpus inspected is single-instruction tasks.</td>
+            <td>Multi-step scenarios are core and share the same copied workspace with adapter continuation.</td>
+            <td>Our multi-step support is a clear strength for real agent workflows.</td>
+          </tr>
+          <tr>
+            <td>Mocks and external systems</td>
+            <td>Pier task environments can define MCP servers and network policies; DeepSWE focuses on repo-contained verifiers.</td>
+            <td>Strict CLI and MCP mocks with recorded calls and <code>mockCalled</code> assertions.</td>
+            <td>Our mock system is more directly useful for enterprise/project workflow evals.</td>
+          </tr>
+          <tr>
+            <td>Artifacts</td>
+            <td>Trial result JSON, logs, trajectories, verifier output, artifacts such as model patch.</td>
+            <td>Records JSONL, result/summary JSON, workspace diff, per-step stdout/stderr/events/assertions/score/cost, report files.</td>
+            <td>Both are strong. Add patch-format model diff as a convenience artifact in our runner.</td>
+          </tr>
+          <tr>
+            <td>Trajectory analysis</td>
+            <td>Augmented ATIF trajectory viewer and <code>pier critique run</code> with fresh-agent critiques.</td>
+            <td>Reports show parsed events/tool calls; <code>llmJudge</code> is assertion-scoped during the run.</td>
+            <td>Post-hoc critique mode would complement our built-in judges.</td>
+          </tr>
+          <tr>
+            <td>QA process</td>
+            <td>Task authoring includes reference solution, flake checks, LLM-assisted analysis, and human review.</td>
+            <td>Authoring guidance encourages goal interview, focused fixtures, deterministic assertions, mocks, and report triage.</td>
+            <td>Adopt DeepSWE’s prompt-verifier bijection and flake-check checklist for high-quality cases.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="recommendations">
+      <h2>Recommendations for <code>harness-evals</code></h2>
+
+      <div class="recommendation">
+        <h3>1) Add a first-class post-agent verifier phase</h3>
+        <p>Introduce a deterministic verifier that runs after the agent step against the edited workspace. It should support commands, timeouts, env, Docker user/workdir, artifacts, and <code>reward.txt</code>/<code>reward.json</code> parsing.</p>
+        <pre><code>verify:
+  command: bash evals/verifiers/checkout.sh
+  timeoutMs: 300000
+  rewardFile: .harness/reward.json
+  artifacts:
+    - coverage/
+assert:
+  - type: reward
+    key: reward
+    min: 1</code></pre>
+      </div>
+
+      <div class="recommendation">
+        <h3>2) Support hidden-test-patch style fixtures for benchmark cases</h3>
+        <p>Add an optional task package format or verifier helper that can apply a project-local patch to a copied workspace after the agent finishes, then run base and challenge tests. This would make DeepSWE-style behavioral verification possible without abandoning YAML scenarios.</p>
+      </div>
+
+      <div class="recommendation">
+        <h3>3) Add attempts and pass@k aggregation</h3>
+        <p>Add <code>--attempts</code> or case-level attempts and calculate pass@k when pass/fail outcomes are binary. This aligns with benchmark practice and captures stochastic agent reliability better than one run per case.</p>
+      </div>
+
+      <div class="recommendation">
+        <h3>4) Persist model patches as first-class artifacts</h3>
+        <p>We already compute workspace diffs. Emit a patch file such as <code>model.patch</code> alongside <code>workspace-diff.json</code> for easier review, replay, and external judging.</p>
+      </div>
+
+      <div class="recommendation">
+        <h3>5) Add Pier-style network isolation controls</h3>
+        <p>Keep the existing environment variable allowlist, but add Docker network modes and per-agent egress allowlists for model/provider endpoints. This matters for tasks where accidental internet access can contaminate results.</p>
+      </div>
+
+      <div class="recommendation">
+        <h3>6) Formalize a high-quality eval authoring checklist</h3>
+        <p>Adopt DeepSWE’s QA vocabulary directly: prompt-verifier bijection, acceptance breadth, realism, environment cleanliness, flake checks, and reference solution review. This can live in <code>skills/harness-evals/docs/writing-evals.md</code>.</p>
+      </div>
+
+      <h3>Practical scoring strategy after these changes</h3>
+      <table>
+        <thead><tr><th>Use case</th><th>Recommended scoring</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>DeepSWE-like code task</td><td>Verifier reward 80–100%, optional latency/cost 0–20%.</td><td>Correct behavior should dominate leaderboard-style evaluations.</td></tr>
+          <tr><td>Project workflow regression</td><td>Required assertions for pass/fail, optional judge score for quality, mocks for external calls.</td><td>Workflow evals need observability over exact agent actions and tool contracts.</td></tr>
+          <tr><td>Agent UX / tool-use comparison</td><td>Assertion pass rate + tool/mock assertions + token/cost buckets.</td><td>Cost and tool behavior matter alongside success.</td></tr>
+          <tr><td>Long multi-step task</td><td>Per-step required assertions; final verifier reward; aggregate final or mean based on case objective.</td><td>Prevents early failure from being hidden by a strong final answer, while still measuring end state.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout purple">
+        <strong>Bottom line:</strong> Keep <code>harness-evals</code> as a flexible project workflow harness, but add a Pier-inspired verifier/reward layer for code-behavior correctness. That combination would cover both local regression evals and benchmark-grade software engineering tasks.
+      </div>
+    </section>
+  </main>
+</body>
+</html>

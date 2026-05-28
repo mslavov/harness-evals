@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import type { ConfigMount } from '../adapters/types.js';
+import type { NetworkPolicyConfig } from '../config/schema.js';
 import { buildDockerArgs } from './args.js';
 
 export interface DockerRunOptions {
@@ -13,6 +14,7 @@ export interface DockerRunOptions {
   workdir: string;
   envNames: string[];
   envValues?: Record<string, string>;
+  network?: NetworkPolicyConfig;
   configMounts: ConfigMount[];
   caseId: string;
   agentName: string;
@@ -31,6 +33,7 @@ export interface DockerCommandMetadata {
     extra: ConfigMount[];
   };
   timeoutMs: number;
+  network?: NetworkPolicyConfig;
 }
 
 export interface DockerRunResult {
@@ -48,6 +51,7 @@ export interface DockerRunResult {
 
 export async function runInDocker(options: DockerRunOptions): Promise<DockerRunResult> {
   const containerName = buildContainerName(options.caseId, options.agentName);
+  const envValues = withNetworkEnv(options.envValues, options.network);
   const dockerArgs = buildDockerArgs({
     image: options.image,
     containerName,
@@ -57,7 +61,8 @@ export async function runInDocker(options: DockerRunOptions): Promise<DockerRunR
     configMount: { source: options.configDir, target: options.configTarget, readonly: false },
     configMounts: options.configMounts,
     envNames: options.envNames,
-    envValues: options.envValues,
+    envValues,
+    network: options.network,
     argv: options.argv,
   });
   const command = ['docker', ...dockerArgs];
@@ -67,7 +72,7 @@ export async function runInDocker(options: DockerRunOptions): Promise<DockerRunR
     containerName,
     argv: options.argv,
     env: {
-      ...(options.envValues ?? {}),
+      ...(envValues ?? {}),
       ...Object.fromEntries(options.envNames.map((name) => [name, process.env[name] ?? null])),
     },
     mounts: {
@@ -76,6 +81,7 @@ export async function runInDocker(options: DockerRunOptions): Promise<DockerRunR
       extra: options.configMounts,
     },
     timeoutMs: options.timeoutMs,
+    network: options.network,
   };
 
   const startedAt = Date.now();
@@ -121,6 +127,14 @@ export async function runInDocker(options: DockerRunOptions): Promise<DockerRunR
     durationMs: Date.now() - startedAt,
     timedOut,
     errorMessage,
+  };
+}
+
+function withNetworkEnv(envValues: Record<string, string> | undefined, network: NetworkPolicyConfig | undefined): Record<string, string> | undefined {
+  if (network?.mode !== 'allowlist') return envValues;
+  return {
+    ...(envValues ?? {}),
+    HARNESS_EVALS_NETWORK_ALLOWLIST: (network.allow ?? []).join(','),
   };
 }
 

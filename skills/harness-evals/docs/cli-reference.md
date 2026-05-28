@@ -15,7 +15,7 @@
 Run the selected case/agent matrix.
 
 ```bash
-harness-evals run [--config path] [--suite name] [--case id] [--agents a,b] [--concurrency n]
+harness-evals run [--config path] [--suite name] [--case id] [--agents a,b] [--concurrency n] [--attempts n]
 ```
 
 Flags:
@@ -24,6 +24,7 @@ Flags:
 - `--case <id>`: run only one case ID.
 - `--agents <a,b>`: run only the named agents (comma-separated).
 - `--concurrency <n>`: run up to `n` matrix entries at once.
+- `--attempts <n>`: override case-level attempt counts for selected cases.
 - `--provider <name>`: override the provider for selected agents.
 - `--model <name>`: override the model for selected agents.
 - `--timeout-ms <n>`: override the per-run timeout.

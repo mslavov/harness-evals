@@ -27,7 +27,7 @@ function sortRows(kind){const tbody=document.querySelector('tbody');[...tbody.ro
 <h1>Harness Evals Results: ${escapeHtml(report.status.toUpperCase())}</h1>
 <div class="meta">Run ${escapeHtml(report.runId)}</div>
 <section class="cards">
-${card('Total', report.summary.total)}${card('Passed', report.summary.passed)}${card('Failed', report.summary.failed)}${card('Errors', report.summary.errors)}${card('Score', formatNumber(report.summary.score))}${card('Duration', formatMs(report.summary.durationMs))}${card('Cost', formatCost(report.summary.cost?.rollup?.totalCost, report.summary.cost?.currency ?? report.summary.cost?.rollup?.currency))}${card('Tokens', report.summary.tokenUsage?.totalTokens)}
+${card('Total', report.summary.total)}${card('Passed', report.summary.passed)}${card('Failed', report.summary.failed)}${card('Errors', report.summary.errors)}${card('Score', formatNumber(report.summary.score))}${card('Duration', formatMs(report.summary.durationMs))}${card('Cost', formatCost(report.summary.cost?.rollup?.totalCost, report.summary.cost?.currency ?? report.summary.cost?.rollup?.currency))}${card('Tokens', report.summary.tokenUsage?.totalTokens)}${card('pass@k', passAtKSummary(report.summary.passAtK))}
 </section>
 <div class="controls"><button onclick="filterRows('all')">All</button><button onclick="filterRows('failed')">Failures</button><button onclick="filterRows('passed')">Passes</button><button onclick="filterRows('error')">Errors</button><button onclick="filterRows('skipped')">Skipped</button><button onclick="sortRows('case')">Sort case</button><button onclick="sortRows('score')">Sort score</button><button onclick="sortRows('duration')">Sort duration</button><button onclick="sortRows('cost')">Sort cost</button></div>
 <table><thead><tr><th>Test case</th>${headers}</tr></thead><tbody>${report.rows.map((row) => {
@@ -55,6 +55,7 @@ function renderCell(cell: TestCaseAgentReportCell | undefined): string {
     cell.details.toolCalls !== undefined ? `<h4>Tool calls</h4><pre>${escapeHtml(JSON.stringify(cell.details.toolCalls, null, 2))}</pre>` : '',
     cell.details.mockCalls !== undefined ? `<h4>Mock calls</h4><pre>${escapeHtml(JSON.stringify(cell.details.mockCalls, null, 2))}</pre>` : '',
     cell.details.judgeResults !== undefined ? `<h4>Judge results</h4><pre>${escapeHtml(JSON.stringify(cell.details.judgeResults, null, 2))}</pre>` : '',
+    cell.details.verifier !== undefined ? `<h4>Verifier</h4><pre>${escapeHtml(JSON.stringify(cell.details.verifier, null, 2))}</pre>` : '',
     cell.details.workspaceDiff !== undefined ? `<h4>Workspace diff</h4><pre>${escapeHtml(JSON.stringify(cell.details.workspaceDiff, null, 2))}</pre>` : '',
     cell.details.logs !== undefined ? `<h4>Logs</h4><ul>${cell.details.logs.map((log) => `<li><a href="${escapeAttr(log.href)}">${escapeHtml(log.label)}</a></li>`).join('')}</ul>` : '',
   ].join('');
@@ -64,6 +65,17 @@ function renderCell(cell: TestCaseAgentReportCell | undefined): string {
 <details><summary>Details</summary>
 ${failedAssertions.length > 0 ? `<h4>Failed assertions</h4><ul>${failedAssertions.map((assertion) => `<li>${escapeHtml(JSON.stringify(assertion))}</li>`).join('')}</ul>` : ''}
 ${detailSections}</details></td>`;
+}
+
+function passAtKSummary(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) return 'n/a';
+  const eligible = value.filter((entry) => isRecord(entry) && entry.eligible === true);
+  if (eligible.length === 0) return 'n/a';
+  return eligible.map((entry) => {
+    const values = isRecord(entry.values) ? entry.values : {};
+    const last = Object.entries(values).at(-1);
+    return last ? `${last[0]}=${formatNumber(last[1])}` : 'n/a';
+  }).join(', ');
 }
 
 function card(label: string, value: unknown): string {

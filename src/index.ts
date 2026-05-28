@@ -60,6 +60,10 @@ export type {
   AdapterDeclaration,
   MockConfig,
   TestCaseMockConfig,
+  TestCaseVerifierConfig,
+  VerifierRewardFormat,
+  NetworkPolicyConfig,
+  NetworkPolicyMode,
   OutputConfig,
   OutputProviderConfig,
   VisualizationConfig,
@@ -67,7 +71,8 @@ export type {
   ProjectScoringConfig,
   MatrixEntry,
 } from './config/schema.js';
-export type { HarnessRunResult, ScenarioRunContext, ScenarioRunStatus, ScenarioStepResult, ScenarioStepStatus, TestRunResult } from './runner/result.js';
+export type { HarnessRunResult, PassAtKSummary, ScenarioRunContext, ScenarioRunStatus, ScenarioStepResult, ScenarioStepStatus, TestRunResult } from './runner/result.js';
+export type { HiddenPatchResult, ModelPatchArtifact, VerifierRewardResult, VerifierRunResult, VerifierStatus } from './verifier/types.js';
 export type { WorkspaceDiff } from './workspace/diff.js';
 export type { AgentEventsSummary, ToolCallSummary, MockCallSummary, CostReport, CostRollup, UsageReport } from './events/types.js';
 export {

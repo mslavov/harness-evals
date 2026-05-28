@@ -93,6 +93,30 @@ class FileOutputProvider implements OutputProvider {
         await appendJsonLine(join(this.options.runDir, 'mock-calls.jsonl'), record.payload);
         if (record.stepId) await appendJsonLine(join(this.options.runDir, 'steps', sanitizePathPart(record.stepId), 'mock-calls.jsonl'), record.payload);
         break;
+      case 'verifier.started':
+        await writeJson(join(this.options.runDir, 'verifier', 'verifier-started.json'), record.payload);
+        break;
+      case 'verifier.command':
+        await writeJson(join(this.options.runDir, 'verifier', 'command.redacted.json'), record.payload);
+        break;
+      case 'verifier.stdout':
+        await writeText(join(this.options.runDir, 'verifier', 'stdout.log'), payloadText(record.payload));
+        break;
+      case 'verifier.stderr':
+        await writeText(join(this.options.runDir, 'verifier', 'stderr.log'), payloadText(record.payload));
+        break;
+      case 'verifier.reward':
+        await writeJson(join(this.options.runDir, 'verifier', 'reward.json'), record.payload);
+        break;
+      case 'verifier.completed':
+        await writeJson(join(this.options.runDir, 'verifier', 'result.json'), record.payload);
+        break;
+      case 'workspace.modelPatch':
+        await writeText(join(this.options.runDir, 'model.patch'), readPayloadContent(record.payload));
+        break;
+      case 'workspace.hiddenPatch':
+        await writeJson(join(this.options.runDir, 'hidden-patch.json'), record.payload);
+        break;
       case 'workspace.diff':
         await writeJson(join(this.options.runDir, 'workspace-diff.json'), record.payload);
         break;
@@ -219,6 +243,12 @@ function readPayloadId(payload: unknown): string | undefined {
   if (typeof payload.assertionId === 'string') return payload.assertionId;
   if (typeof payload.id === 'string') return payload.id;
   return undefined;
+}
+
+function readPayloadContent(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  if (isRecord(payload) && typeof payload.content === 'string') return payload.content;
+  return '';
 }
 
 function isHarnessSummaryPayload(payload: unknown): payload is { pass: boolean; results: Array<Record<string, unknown>> } {

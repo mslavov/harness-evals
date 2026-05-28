@@ -17,6 +17,13 @@ export interface DockerConfig {
   envAllowlist: string[];
 }
 
+export type NetworkPolicyMode = 'default' | 'none' | 'allowlist';
+
+export interface NetworkPolicyConfig {
+  mode: NetworkPolicyMode;
+  allow?: string[];
+}
+
 export interface AgentConfig {
   adapter: string;
   extends?: string;
@@ -62,6 +69,21 @@ export interface TestCaseMockConfig {
   cli?: Record<string, string>;
   mcp?: Record<string, string>;
   strict?: boolean;
+}
+
+export type VerifierRewardFormat = 'auto' | 'json' | 'text';
+
+export interface TestCaseVerifierConfig {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: string[];
+  timeoutMs?: number;
+  rewardFile?: string;
+  rewardFormat?: VerifierRewardFormat;
+  hiddenPatch?: string;
+  captureModelPatch?: boolean;
+  network?: NetworkPolicyConfig;
 }
 
 export interface OutputProviderConfig {
@@ -131,7 +153,7 @@ export interface LlmJudgeAssertionConfig extends BaseAssertionConfig {
 
 export type AssertionConfig = BaseAssertionConfig | LlmJudgeAssertionConfig;
 
-export type ScoreType = 'assertionPassRate' | 'judgeScore' | 'latency' | 'cost' | 'tokenUsage';
+export type ScoreType = 'assertionPassRate' | 'judgeScore' | 'verifierReward' | 'latency' | 'cost' | 'tokenUsage';
 export type ScoreTarget = 'maximize' | 'minimize';
 
 export interface ScoreTypeConfig {
@@ -164,6 +186,8 @@ export interface TestCaseDefinition {
   workspace?: Partial<WorkspaceConfig>;
   agents?: AgentsSelection;
   mocks?: TestCaseMockConfig;
+  verifier?: TestCaseVerifierConfig;
+  attempts?: number;
   steps: TestCaseStepDefinition[];
   timeoutMs?: number;
   sourcePath?: string;
@@ -205,6 +229,7 @@ export interface CliOverrides {
   caseId?: string;
   suite?: string;
   concurrency?: number;
+  attempts?: number;
   provider?: string;
   model?: string;
   timeoutMs?: number;
@@ -218,6 +243,9 @@ export interface MatrixEntry {
   agent: AgentConfig;
   workspace: WorkspaceConfig;
   docker: DockerConfig;
+  attemptIndex: number;
+  attemptNumber: number;
+  attempts: number;
 }
 
 export const DEFAULT_ENV_ALLOWLIST = [
@@ -275,6 +303,7 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
   scoring: {
     assertionPassRate: { weight: 1 },
     judgeScore: { weight: 1 },
+    verifierReward: { weight: 1 },
     latency: { weight: 0 },
     cost: { weight: 0 },
     tokenUsage: { weight: 0 },

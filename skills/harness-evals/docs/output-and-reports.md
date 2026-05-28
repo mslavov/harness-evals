@@ -35,6 +35,17 @@ Common files in a run directory:
 - `finalize.json`: provider finalize status
 - `index.html`: per-run HTML report when HTML visualization is enabled
 - `mock-config.json` and `mock-calls.jsonl` when mocks are used
+- `model.patch` when model patch capture is enabled
+- `hidden-patch.json` when a hidden patch is applied
+
+Verifier files live under `verifier/` when a case has `verifier`:
+
+- `verifier-started.json`
+- `command.redacted.json`
+- `stdout.log`
+- `stderr.log`
+- `reward.json` when a reward file is parsed
+- `result.json`
 
 Per-step files live under `steps/<step-id>/`:
 
@@ -66,7 +77,7 @@ By default it writes:
 - `results.json`
 - `results.csv`
 
-The summary content is built from the full run results and includes pass/fail counts, average score, duration, cost, token usage, per-case rows, and per-agent columns.
+The summary content is built from the full run results and includes pass/fail counts, average score, duration, cost, token usage, pass@k summaries when eligible, per-case rows, and per-agent columns.
 
 ## Visualization formats
 
@@ -156,6 +167,6 @@ It shows:
 - one column per agent/provider/model combination
 - one row per test case
 - status, score, duration, cost, tokens, and assertion summary per cell
-- expandable details for steps, failed assertions, tool calls, mock calls, judge results, workspace diff, and log links when included
+- expandable details for steps, failed assertions, tool calls, mock calls, judge results, verifier results, workspace diff, and log links when included
 
 Use the raw JSON artifacts when you need machine-readable detail; use HTML or CSV for comparison and review.
