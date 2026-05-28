@@ -7,3 +7,8 @@ coverage/
 .env
 .env.*
 .pi/plans
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
