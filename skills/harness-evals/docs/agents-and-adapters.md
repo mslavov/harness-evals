@@ -103,15 +103,15 @@ How merging works:
 
 If an agent uses `extends`, it does not need its own `adapter` as long as the parent defines one.
 
-## Current auth and config mounting
+## Current auth and config passthrough
 
-`claude-code`, `codex`, and `cursor` can reuse your current local login/config directory inside the container.
+`claude-code`, `codex`, and `cursor` reuse your current local config (skills, settings, plugins, MCP servers, custom commands/agents) inside the container.
 
 Default behavior:
 
-- if no matching auth env var is already available, harness-evals mounts the current config directory read-only into `/agent-config/<adapter>`
-- it also sets the adapter-specific config env var inside the container so the CLI reads that mounted directory
-- if an auth env var is already present, the mount is skipped and the env-based credential is used instead
+- harness-evals copies a writable **snapshot** of your current config directory into `/agent-config/<adapter>` per run, sets the adapter-specific config env var to point at it, and deletes the copy after the run. A writable copy (not a read-only mount) lets the CLI refresh OAuth tokens and write session state without touching your host config.
+- the config copy is **independent of credentials**: it happens even when an auth env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) is already set. The credential env is still forwarded and redacted.
+- noisy/large subdirectories (logs, sessions, caches, project history) are excluded by default to keep the snapshot small.
 
 Controls:
 
@@ -122,19 +122,29 @@ agents:
     useCurrentConfig: true
     userConfigDirs:
       - ~/.claude
+    config:
+      configExcludeDirs: [projects]   # extra dirs to skip when copying
+      configIncludeDirs: [logs]       # force-keep a default-excluded dir
+      mcpConfig: /workspace/.mcp.json # claude: --mcp-config <file>
+      strictMcp: true                 # claude: --strict-mcp-config
 ```
 
 Relevant fields:
 
-- `useCurrentConfig`: enable or disable current-config fallback. Defaults to enabled for these built-ins.
+- `useCurrentConfig` (alias `config.copyCurrentConfig`): enable or disable the config copy. Defaults to enabled for these built-ins.
 - `userConfigDirs`: override the source directory searched on the host. Only the first entry is used.
+- `config.configExcludeDirs` / `config.configIncludeDirs`: tune which subdirectories are copied. Overridable per case and per step.
+- `config.mcpConfig` / `config.strictMcp` (claude-code only): pass `--mcp-config`/`--strict-mcp-config` for headless MCP loading.
+- `config.codexSandbox` / `config.skipGitRepoCheck` (codex only): control the non-interactive `exec` sandbox (default `danger-full-access`, suitable for containerized runs) and the git-repo check.
 - `apiKeyEnv`: add your own credential env name to the forwarded env set.
 
 Adapter defaults:
 
-- `claude-code` uses `CLAUDE_CONFIG_DIR`
-- `codex` uses `CODEX_HOME`
-- `cursor` uses `CURSOR_CONFIG_DIR`
+- `claude-code` uses `CLAUDE_CONFIG_DIR`; its sibling `~/.claude.json` (user-scope MCP, trust, settings) is copied alongside the directory. On macOS the login lives in the Keychain, not the copied dir — run `claude setup-token` once and export `CLAUDE_CODE_OAUTH_TOKEN`.
+- `codex` uses `CODEX_HOME` (covers `config.toml`, profiles, `[mcp_servers]`, and `auth.json`).
+- `cursor` uses `CURSOR_CONFIG_DIR`.
+
+`useCurrentConfig: false` disables the copy entirely; only forwarded credential env vars are used.
 
 ### Pi config behavior
 
@@ -167,7 +177,7 @@ Notes:
 
 - `userConfigDirs[0]` points to the host Pi agent directory.
 - `projectConfigDirs[0]` changes where harness-evals looks for the current project `.pi/settings.json` source.
-- local paths referenced from Pi settings are rewritten to container repo paths when they stay inside the project; paths outside the repo are left unchanged.
+- local paths referenced from Pi settings are rewritten to container repo paths when they stay inside the project; paths **outside** the repo (e.g. host-global skills/extensions/packages in `~/...`) are copied into the per-run config dir under `pi-resources/` and rewritten to their container path, then removed after the run.
 - Pi runs from the container workspace and sets `PI_CODING_AGENT_DIR` to the per-run config directory.
 
 ## Declare a project adapter

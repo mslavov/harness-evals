@@ -27,6 +27,7 @@ export const cursorAdapter: AgentAdapter = {
       configEnvName: 'CURSOR_CONFIG_DIR',
       defaultConfigDirs: cursorDefaultConfigDirs(),
       credentialEnvNames: CURSOR_AUTH_ENV_NAMES,
+      excludeDirs: ['logs', 'cache', 'Cache', 'chats', 'sessions'],
     });
 
     return {
@@ -37,6 +38,7 @@ export const cursorAdapter: AgentAdapter = {
       configMounts: currentAuth.configMounts,
       parser: input.agent.parser ?? 'text',
       timeoutMs: input.agent.timeoutMs,
+      cleanupPaths: currentAuth.cleanupPaths,
       metadata: { currentAuth: currentAuth.metadata },
     };
   },

@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
-import { access, chmod, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { access, chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { expandTrustedPath, resolveProjectPath, resolveTrustedPath } from '../config/paths.js';
 import type { AgentEventsSummary, ToolCallSummary } from '../events/types.js';
 import { type AgentAdapter, type AgentCompletionInput, type AgentStepPrepareInput, type AgentStepRunPlan } from './types.js';
@@ -22,15 +23,22 @@ interface SettingsMetadata {
     globalSettingsSourcePath?: string;
     projectSettingsSourcePath?: string;
     warnings: string[];
+    stagedResources?: Array<{ source: string; target: string }>;
   };
   generatedGlobalSettings?: unknown;
   generatedProjectSettings?: unknown;
+}
+
+interface ResourceStaging {
+  cache: Map<string, string>;
+  copies: Array<{ source: string; containerPath: string }>;
 }
 
 const JUDGE_SYSTEM_PROMPT = 'You are a strict evaluation judge. Return only valid JSON.';
 const RESOURCE_FIELDS = new Set(['extensions', 'skills', 'prompts', 'themes']);
 const NON_LOCAL_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https:', 'ssh:'];
 const SECRET_CONFIG_FILES = ['auth.json', 'models.json', 'model-tiers.json'];
+const RESOURCE_STAGING_DIR = 'pi-resources';
 export const PI_AUTH_ENV_NAMES = ['PI_EVAL_API_KEY'] as const;
 
 export const piAdapter: AgentAdapter = {
@@ -67,7 +75,8 @@ export const piAdapter: AgentAdapter = {
     const useCurrentConfig = readBoolean(config.useCurrentConfig) ?? input.agent.useCurrentConfig ?? true;
     const copyCurrentConfigFilesForRun = readBoolean(config.copyCurrentConfigFiles) ?? input.agent.useCurrentConfig ?? true;
     const selection = await resolvePiSelection(input.agent);
-    const settings = await writeSettings(input, config, useCurrentConfig);
+    const staging: ResourceStaging = { cache: new Map(), copies: [] };
+    const settings = await writeSettings(input, config, useCurrentConfig, staging);
     const copiedConfigFiles = copyCurrentConfigFilesForRun ? await copyCurrentConfigFiles(input) : [];
 
     const argv = buildPiArgs({
@@ -86,7 +95,10 @@ export const piAdapter: AgentAdapter = {
       configMounts: [],
       parser: input.agent.parser ?? 'pi-jsonl',
       timeoutMs: input.agent.timeoutMs,
-      cleanupPaths: copiedConfigFiles.map((file) => file.targetPath),
+      cleanupPaths: [
+        ...copiedConfigFiles.map((file) => file.targetPath),
+        ...(staging.copies.length > 0 ? [join(input.configDir, RESOURCE_STAGING_DIR)] : []),
+      ],
       metadata: {
         settings,
         configFiles: copiedConfigFiles.map((file) => ({
@@ -359,6 +371,7 @@ async function writeSettings(
   input: AgentStepPrepareInput,
   config: Record<string, unknown>,
   useCurrentConfig: boolean,
+  staging: ResourceStaging,
 ): Promise<SettingsMetadata> {
   const templates: string[] = [];
   const sources: string[] = [];
@@ -376,7 +389,7 @@ async function writeSettings(
     metadata.generatedGlobalSettings = settings;
   } else if (useCurrentConfig && globalTemplate !== null) {
     const sourcePath = join(getCurrentAgentDir(input.agent), 'settings.json');
-    const settings = await loadAndRenderCurrentSettings(sourcePath, dirname(sourcePath), input, currentWarnings);
+    const settings = await loadAndRenderCurrentSettings(sourcePath, dirname(sourcePath), input, currentWarnings, staging);
     if (settings !== undefined) {
       sources.push(`current:${sourcePath}`);
       await writeJson(join(input.configDir, 'settings.json'), settings);
@@ -395,7 +408,7 @@ async function writeSettings(
     metadata.generatedProjectSettings = settings;
   } else if (useCurrentConfig && projectTemplate !== null) {
     const sourcePath = getCurrentProjectSettingsPath(input);
-    const settings = await loadAndRenderCurrentSettings(sourcePath, dirname(sourcePath), input, currentWarnings);
+    const settings = await loadAndRenderCurrentSettings(sourcePath, dirname(sourcePath), input, currentWarnings, staging);
     if (settings !== undefined) {
       sources.push(`current:${sourcePath}`);
       await writeJson(join(input.workspaceDir, '.pi', 'settings.json'), settings);
@@ -405,7 +418,15 @@ async function writeSettings(
     }
   }
 
-  if (currentWarnings.length > 0) metadata.currentConfig = metadata.currentConfig ?? { warnings: currentWarnings };
+  if (currentWarnings.length > 0 || staging.copies.length > 0) {
+    metadata.currentConfig = metadata.currentConfig ?? { warnings: currentWarnings };
+  }
+  if (staging.copies.length > 0 && metadata.currentConfig) {
+    metadata.currentConfig.stagedResources = staging.copies.map((copy) => ({
+      source: copy.source,
+      target: copy.containerPath,
+    }));
+  }
   return metadata;
 }
 
@@ -422,47 +443,61 @@ async function loadAndRenderCurrentSettings(
   baseDir: string,
   input: AgentStepPrepareInput,
   warnings: string[],
+  staging: ResourceStaging,
 ): Promise<Record<string, unknown> | undefined> {
   if (!(await pathExists(path))) return undefined;
 
   const raw = await readFile(path, 'utf8');
   const parsed = JSON.parse(raw) as unknown;
   if (!isRecord(parsed)) throw new Error(`Current settings file must be a JSON object: ${path}`);
-  return renderCurrentSettings(parsed, baseDir, input, warnings);
+  return renderCurrentSettings(parsed, baseDir, input, warnings, staging);
 }
 
-function renderCurrentSettings(
+async function renderCurrentSettings(
   settings: Record<string, unknown>,
   baseDir: string,
   input: AgentStepPrepareInput,
   warnings: string[],
-): Record<string, unknown> {
+  staging: ResourceStaging,
+): Promise<Record<string, unknown>> {
   const rendered: Record<string, unknown> = { ...settings };
 
   if (Array.isArray(rendered.packages)) {
-    rendered.packages = rendered.packages.map((pkg) => renderPackageEntry(pkg, baseDir, input, warnings));
+    rendered.packages = await Promise.all(rendered.packages.map((pkg) => renderPackageEntry(pkg, baseDir, input, warnings, staging)));
   }
 
   for (const field of RESOURCE_FIELDS) {
     const value = rendered[field];
     if (Array.isArray(value)) {
-      rendered[field] = value.map((entry) => {
-        if (typeof entry !== 'string') return entry;
-        return renderLocalSource(entry, baseDir, input, warnings);
-      });
+      rendered[field] = await Promise.all(value.map((entry) => {
+        if (typeof entry !== 'string') return Promise.resolve(entry);
+        return renderLocalSource(entry, baseDir, input, warnings, staging);
+      }));
     }
   }
 
   return rendered;
 }
 
-function renderPackageEntry(pkg: unknown, baseDir: string, input: AgentStepPrepareInput, warnings: string[]): unknown {
-  if (typeof pkg === 'string') return renderLocalSource(pkg, baseDir, input, warnings);
+async function renderPackageEntry(
+  pkg: unknown,
+  baseDir: string,
+  input: AgentStepPrepareInput,
+  warnings: string[],
+  staging: ResourceStaging,
+): Promise<unknown> {
+  if (typeof pkg === 'string') return renderLocalSource(pkg, baseDir, input, warnings, staging);
   if (!isRecord(pkg) || typeof pkg.source !== 'string') return pkg;
-  return { ...pkg, source: renderLocalSource(pkg.source, baseDir, input, warnings) };
+  return { ...pkg, source: await renderLocalSource(pkg.source, baseDir, input, warnings, staging) };
 }
 
-function renderLocalSource(source: string, baseDir: string, input: AgentStepPrepareInput, warnings: string[]): string {
+async function renderLocalSource(
+  source: string,
+  baseDir: string,
+  input: AgentStepPrepareInput,
+  warnings: string[],
+  staging: ResourceStaging,
+): Promise<string> {
   const renderedTemplate = renderTemplateString(source, input.docker.repoPath);
   if (!isLocalSource(renderedTemplate)) return renderedTemplate;
 
@@ -472,8 +507,41 @@ function renderLocalSource(source: string, baseDir: string, input: AgentStepPrep
     return `${input.docker.repoPath}/${repoRelative}`;
   }
 
+  // Out-of-repo local resource: copy a snapshot into the per-run config dir and rewrite to its
+  // container path so host-global pi skills/extensions/packages resolve inside the container.
+  const staged = await stageOutOfRepoResource(hostPath, input, staging, warnings);
+  if (staged) return staged;
+
   warnings.push(`Leaving local path unchanged because it is outside the Docker repo context: ${source}`);
   return source;
+}
+
+async function stageOutOfRepoResource(
+  hostPath: string,
+  input: AgentStepPrepareInput,
+  staging: ResourceStaging,
+  warnings: string[],
+): Promise<string | undefined> {
+  const cached = staging.cache.get(hostPath);
+  if (cached) return cached;
+
+  if (!(await pathExists(hostPath))) return undefined;
+
+  const name = `${basename(hostPath)}-${createHash('sha1').update(hostPath).digest('hex').slice(0, 8)}`;
+  const targetHostPath = join(input.configDir, RESOURCE_STAGING_DIR, name);
+  const containerPath = `${input.docker.configRoot.replace(/\/+$/, '')}/${RESOURCE_STAGING_DIR}/${name}`;
+
+  try {
+    await mkdir(dirname(targetHostPath), { recursive: true });
+    await cp(hostPath, targetHostPath, { recursive: true });
+  } catch (error) {
+    warnings.push(`Failed to stage out-of-repo resource ${hostPath}: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+
+  staging.cache.set(hostPath, containerPath);
+  staging.copies.push({ source: hostPath, containerPath });
+  return containerPath;
 }
 
 function renderTemplateValue(value: unknown, containerRepoRoot: string): unknown {
