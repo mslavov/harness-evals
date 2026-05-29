@@ -10,6 +10,7 @@ import { buildCostSummary, buildStepCostReport, mergeCostReports, missingCostRep
 import type { CostSummary } from '../cost/types.js';
 import { ImageResolutionError, resolveDockerImage, type ImageResolutionAgent, type ImageResolutionResult } from '../docker/image-resolver.js';
 import { runInDocker } from '../docker/runner.js';
+import { seedWorkspaceFromImage } from '../docker/seed.js';
 import { redactJson, redactionsFromEnv, type Redaction } from '../redaction.js';
 import { copyWorkspace } from '../workspace/copy.js';
 import { diffWorkspace } from '../workspace/diff.js';
@@ -176,8 +177,20 @@ export async function runTestCase(
     const dockerImage = imageResolution.image;
 
     await mkdir(configDir, { recursive: true });
-    await copyWorkspace(entry.workspace.fixture ?? entry.workspace.source, workspaceDir, { ignore: entry.workspace.ignore });
-    if (entry.testCase.verifier && shouldCaptureModelPatch(entry.testCase.verifier)) {
+    if (entry.workspace.seedFromImage) {
+      // Harbor/DeepSWE-style: the repo lives inside the resolved image. Extract
+      // it (with .git) into the bind-mounted workspace so agent edits persist
+      // into the verifier container, which sees the same mount.
+      await seedWorkspaceFromImage({
+        image: dockerImage,
+        seedPath: entry.workspace.seedPath ?? '/app',
+        workspaceDir,
+        timeoutMs: entry.docker.timeoutMs,
+      });
+    } else {
+      await copyWorkspace(entry.workspace.fixture ?? entry.workspace.source, workspaceDir, { ignore: entry.workspace.ignore });
+    }
+    if (!entry.workspace.seedFromImage && entry.testCase.verifier && shouldCaptureModelPatch(entry.testCase.verifier)) {
       await copyWorkspace(workspaceDir, baseWorkspaceDir, { ignore: [] });
       cleanupPaths.push(baseWorkspaceDir);
     }
@@ -244,6 +257,7 @@ export async function runTestCase(
       workspaceDir,
       configDir,
       dockerImage,
+      projectRoot: config.projectRoot,
     });
 
     const result = buildTestRunResult({
@@ -826,6 +840,7 @@ async function runVerifierArtifacts(input: {
   workspaceDir: string;
   configDir: string;
   dockerImage: string;
+  projectRoot: string;
 }): Promise<{ verifier?: VerifierRunResult; modelPatch?: ModelPatchArtifact; hiddenPatch?: HiddenPatchResult }> {
   const verifierConfig = input.entry.testCase.verifier;
   if (!verifierConfig) return {};
@@ -870,6 +885,7 @@ async function runVerifierArtifacts(input: {
     configDir: input.configDir,
     workspace: input.entry.workspace,
     docker: input.entry.docker,
+    projectRoot: input.projectRoot,
     caseId: input.entry.testCase.id,
     agentName: input.entry.agentName,
   });

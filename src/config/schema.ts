@@ -6,10 +6,21 @@ export interface WorkspaceConfig {
   containerPath: string;
   ignore: string[];
   fixture?: string;
+  // When true, the workspace is seeded by extracting `seedPath` (default /app)
+  // from the resolved Docker image instead of copying `source`/`fixture`.
+  // Used for Harbor/DeepSWE-style tasks whose repo lives inside the image.
+  seedFromImage?: boolean;
+  seedPath?: string;
 }
 
 export interface DockerConfig {
   image?: string;
+  // Base image for the managed build. When set (and `image` is not), the agent
+  // install recipe is layered on top of this image instead of MANAGED_BASE_IMAGE.
+  baseImage?: string;
+  // Commands run in the managed Dockerfile right after the base image, before
+  // adapter recipes. Use to guarantee runtimes (node/python3) on arbitrary bases.
+  baseSetup?: string[];
   repoPath: string;
   home: string;
   configRoot: string;
@@ -84,6 +95,11 @@ export interface TestCaseVerifierConfig {
   hiddenPatch?: string;
   captureModelPatch?: boolean;
   network?: NetworkPolicyConfig;
+  // Project-relative host directory mounted read-only into the verifier
+  // container only (not the agent steps). Used to deliver hidden tests.
+  assetsDir?: string;
+  // Container mount target for `assetsDir` (default /tests).
+  assetsTarget?: string;
 }
 
 export interface OutputProviderConfig {
@@ -183,6 +199,8 @@ export interface TestCaseDefinition {
   id: string;
   description?: string;
   suite?: string;
+  // Per-case base image (becomes docker.baseImage for this case's managed build).
+  image?: string;
   workspace?: Partial<WorkspaceConfig>;
   agents?: AgentsSelection;
   mocks?: TestCaseMockConfig;
@@ -276,6 +294,7 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
     configRoot: '/agent-config',
     timeoutMs: 300_000,
     envAllowlist: DEFAULT_ENV_ALLOWLIST,
+    baseSetup: [],
   },
   agents: {},
   tests: ['evals/tests/**/*.yaml'],

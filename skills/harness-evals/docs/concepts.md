@@ -95,6 +95,7 @@ Important points:
 - runs do not edit your source tree directly
 - ignore patterns are applied during copy and diffing
 - a test case can point at a fixture directory instead of the default source
+- a case can set `workspace.seedFromImage` to seed the workspace from a path inside the Docker image (default `/app`, including `.git`) instead of copying a source — for tasks whose repo ships in the image
 - multi-step cases reuse the same copied workspace across steps
 
 ### Assertion
@@ -119,7 +120,7 @@ Assertions are attached to steps. Required assertions default to `true` unless y
 
 A verifier is an optional post-agent command that runs after all agent steps finish.
 
-Use it for checks that are easier to express as code than as step assertions, including hidden tests. A verifier can parse a numeric `reward.txt` or `reward.json`, apply a hidden patch before running, and write verifier artifacts under the run directory.
+Use it for checks that are easier to express as code than as step assertions, including hidden tests. A verifier can parse a numeric `reward.txt` or `reward.json`, apply a hidden patch before running, and write verifier artifacts under the run directory. It can also mount a directory of hidden grading material read-only into the verifier container only via `verifier.assetsDir` (default target `/tests`), keeping those files out of the agent's workspace.
 
 ### Attempt
 

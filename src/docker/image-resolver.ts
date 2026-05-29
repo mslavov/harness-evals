@@ -24,6 +24,7 @@ export interface ImageResolutionInput {
 export interface InstallManifest {
   schemaVersion: 1;
   baseImage: string;
+  baseSetup: string[];
   recipes: NormalizedInstallRecipe[];
 }
 
@@ -95,7 +96,7 @@ export async function resolveDockerImage(input: ImageResolutionInput): Promise<I
   const recipes = await collectInstallRecipes(input);
   if (input.docker.image) return resolveReadyImage(input.docker.image, recipes, input.docker.timeoutMs);
 
-  const manifest = buildInstallManifest(recipes);
+  const manifest = buildInstallManifest(recipes, input.docker);
   const cacheKey = computeCacheKey(manifest);
   const image = `${MANAGED_TAG_PREFIX}:${cacheKey}`;
   const refreshManagedImage = input.refreshManagedImage ?? false;
@@ -244,10 +245,11 @@ async function collectInstallRecipes(input: ImageResolutionInput): Promise<Norma
   return recipes.sort(compareRecipes);
 }
 
-function buildInstallManifest(recipes: NormalizedInstallRecipe[]): InstallManifest {
+function buildInstallManifest(recipes: NormalizedInstallRecipe[], docker: DockerConfig): InstallManifest {
   return {
     schemaVersion: IMAGE_SCHEMA_VERSION,
-    baseImage: MANAGED_BASE_IMAGE,
+    baseImage: docker.baseImage ?? MANAGED_BASE_IMAGE,
+    baseSetup: docker.baseSetup ?? [],
     recipes,
   };
 }
@@ -348,6 +350,8 @@ function renderDockerfile(manifest: InstallManifest, cacheKey: string): string {
     'RUN mkdir -p "$HOME" /workspace /agent-config',
     'WORKDIR /workspace',
   ];
+
+  for (const command of manifest.baseSetup ?? []) lines.push(`RUN ${command}`);
 
   for (const recipe of manifest.recipes) {
     for (const command of recipe.commands) lines.push(`RUN ${command}`);

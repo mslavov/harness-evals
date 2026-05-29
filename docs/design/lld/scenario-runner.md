@@ -216,7 +216,7 @@ pending
 
 Rules:
 
-1. The workspace is copied once per `(test case, agent)` run, not once per step, so later steps observe earlier step changes.
+1. The workspace is seeded once per `(test case, agent)` run, not once per step, so later steps observe earlier step changes. The default seed source is the copied `workspace.source`/`fixture`; when `workspace.seedFromImage` is set the runner instead extracts `seedPath` (default `/app`) from the resolved Docker image (preserving `.git`), so tasks whose repo lives inside the image edit a bind-mounted copy the verifier then sees.
 2. The runner stores and passes adapter continuation metadata without interpreting it.
 3. The adapter decides how to continue between steps: native session ID, transcript replay, CLI-specific context, or no extra state beyond the shared workspace.
 4. A required assertion failure stops later steps and marks them `skipped`.
@@ -238,9 +238,9 @@ Rules:
 ### Write path
 
 1. Create one output context for the test-case/agent pair.
-2. Copy source workspace or fixture once for the test-case run.
+2. Seed the workspace once for the test-case run: copy the source workspace or fixture, or, when `workspace.seedFromImage` is set, extract `seedPath` from the resolved image.
 3. For each step, stage mocks when declared, emit mock config/call records, logs, and normalized step output records.
-4. After the final step or stop condition, emit workspace diff, score summary, cost summary, and result records.
+4. After the final step or stop condition, run the post-agent verifier when configured, emit workspace diff, score summary, cost summary, and result records. When `verifier.assetsDir` is set, the runner mounts that project-relative host directory read-only at `verifier.assetsTarget` (default `/tests`) into the verifier container only — never into agent steps — so hidden tests reach the verifier without leaking to the agent.
 5. Let configured output providers persist the records.
 6. Remove adapter-declared cleanup paths before the run finishes.
 
@@ -276,7 +276,8 @@ Rules:
 - Explicit `tests` glob patterns in `harness-evals.yaml` override default discovery.
 - Required assertions control whether later steps run.
 - Multi-step continuation is adapter-owned and represented by opaque continuation metadata.
-- The workspace is copied once per test-case/agent run and shared by all steps in that run.
+- The workspace is seeded once per test-case/agent run and shared by all steps in that run; the seed source is the copied source/fixture or, with `workspace.seedFromImage`, the image's `seedPath`.
+- Hidden verifier assets are delivered through a verifier-only read-only mount (`verifier.assetsDir` → `assetsTarget`), keeping them out of the agent's workspace.
 - The test case schema does not define adapter continuation policy fields.
 
 ### Open decisions

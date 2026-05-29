@@ -15,7 +15,11 @@ export function buildMatrix(config: LoadedHarnessConfig, cli: CliOverrides = {})
 
       const agent = applyMergeOrder(baseAgent, testCase, agentName, cli);
       const workspace = mergeWorkspaceConfig(config.workspace, testCase.workspace);
-      const docker = mergeDockerConfig(config.docker, cli.dockerImage ? { image: cli.dockerImage } : undefined);
+      const dockerOverride = {
+        ...(testCase.image ? { baseImage: testCase.image } : {}),
+        ...(cli.dockerImage ? { image: cli.dockerImage } : {}),
+      };
+      const docker = mergeDockerConfig(config.docker, Object.keys(dockerOverride).length ? dockerOverride : undefined);
       for (let attemptIndex = 0; attemptIndex < attempts; attemptIndex++) {
         entries.push({ testCase, agentName, agent, workspace, docker, attemptIndex, attemptNumber: attemptIndex + 1, attempts });
       }

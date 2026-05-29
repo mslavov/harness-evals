@@ -53,11 +53,12 @@ export function mergeWorkspaceConfig(base: WorkspaceConfig, override?: Partial<W
 }
 
 export function mergeDockerConfig(base: DockerConfig, override?: Partial<DockerConfig>): DockerConfig {
-  if (!override) return { ...base, envAllowlist: [...base.envAllowlist] };
+  if (!override) return { ...base, envAllowlist: [...base.envAllowlist], baseSetup: base.baseSetup ? [...base.baseSetup] : undefined };
   return {
     ...base,
     ...definedObject(override),
     envAllowlist: override.envAllowlist ? [...override.envAllowlist] : [...base.envAllowlist],
+    baseSetup: override.baseSetup ? [...override.baseSetup] : base.baseSetup ? [...base.baseSetup] : undefined,
   };
 }
 

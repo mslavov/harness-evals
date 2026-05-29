@@ -365,6 +365,7 @@ function readTestCase(value: unknown, path: string): TestCase {
     id,
     description: readOptionalString(value.description, 'description'),
     suite: readOptionalString(value.suite, 'suite'),
+    image: readOptionalString(value.image, 'image'),
     agents: readAgentsSelection(value.agents),
     workspace: normalizeLegacyWorkspace(value.workspace, vars),
     mocks: readTestCaseMocks(value.mocks, 'mocks'),
@@ -472,12 +473,13 @@ function readTestCaseMocks(value: unknown, field: string): TestCaseMockConfig | 
 function readVerifierConfig(value: unknown, field: string): TestCaseVerifierConfig | undefined {
   if (value === undefined || value === null) return undefined;
   if (!isRecord(value)) throw new Error(`${field} must be an object`);
-  assertKnownKeys(value, ['command', 'args', 'cwd', 'env', 'timeoutMs', 'rewardFile', 'rewardFormat', 'hiddenPatch', 'captureModelPatch', 'network'], field);
+  assertKnownKeys(value, ['command', 'args', 'cwd', 'env', 'timeoutMs', 'rewardFile', 'rewardFormat', 'hiddenPatch', 'captureModelPatch', 'network', 'assetsDir', 'assetsTarget'], field);
   const command = readOptionalString(value.command, `${field}.command`);
   if (!command) throw new Error(`${field}.command is required`);
   const rewardFile = readRelativePath(value.rewardFile, `${field}.rewardFile`);
   const hiddenPatch = readRelativePath(value.hiddenPatch, `${field}.hiddenPatch`);
   const rewardFormat = readRewardFormat(value.rewardFormat, `${field}.rewardFormat`);
+  const assetsDir = readRelativePath(value.assetsDir, `${field}.assetsDir`);
 
   return {
     command,
@@ -490,6 +492,8 @@ function readVerifierConfig(value: unknown, field: string): TestCaseVerifierConf
     hiddenPatch,
     captureModelPatch: readOptionalBoolean(value.captureModelPatch, `${field}.captureModelPatch`),
     network: readNetworkPolicy(value.network, `${field}.network`),
+    assetsDir,
+    assetsTarget: readOptionalString(value.assetsTarget, `${field}.assetsTarget`),
   };
 }
 
@@ -550,6 +554,9 @@ function normalizeTestCase(testCase: TestCase, projectRoot: string, path: string
   const hiddenPatch = testCase.verifier?.hiddenPatch
     ? resolveProjectPath(projectRoot, testCase.verifier.hiddenPatch, `verifier.hiddenPatch in ${path}`)
     : undefined;
+  const assetsDir = testCase.verifier?.assetsDir
+    ? resolveProjectPath(projectRoot, testCase.verifier.assetsDir, `verifier.assetsDir in ${path}`)
+    : undefined;
 
   validateMockReferences(testCase.mocks, mocks.root, projectRoot, `mocks in ${path}`);
   for (const step of testCase.steps) {
@@ -559,7 +566,7 @@ function normalizeTestCase(testCase: TestCase, projectRoot: string, path: string
   return {
     ...testCase,
     workspace: testCase.workspace ? { ...testCase.workspace, source, fixture } : undefined,
-    verifier: testCase.verifier ? { ...testCase.verifier, hiddenPatch } : undefined,
+    verifier: testCase.verifier ? { ...testCase.verifier, hiddenPatch, assetsDir } : undefined,
   };
 }
 

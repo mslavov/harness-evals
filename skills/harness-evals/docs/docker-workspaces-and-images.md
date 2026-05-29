@@ -73,6 +73,26 @@ Behavior:
 
 Fixture paths are resolved relative to the project root and path traversal outside the project is rejected.
 
+## Seed the workspace from the image
+
+Some tasks ship their repo already checked out inside the Docker image (for example Harbor/DeepSWE-style benchmarks). For those, set `workspace.seedFromImage` so the workspace is populated by extracting a path from the resolved image instead of copying `source`/`fixture`.
+
+```yaml
+workspace:
+  seedFromImage: true
+  seedPath: /app          # default /app
+  containerPath: /app
+```
+
+Behavior:
+
+- harness-evals creates a container from the resolved image, copies `seedPath` (recursively, **including `.git`**) into the run workspace, then removes the container.
+- the default `copy` ignore rules are **not** applied — the seed is a faithful copy of the image path.
+- the seeded workspace is bind-mounted at `containerPath`, so the agent's edits persist into a separately-launched verifier container.
+- `seedPath` defaults to `/app`; point `containerPath` at the same path so the agent and verifier both work in the repo.
+
+Use this when the repo under test lives in the image and you want the agent to edit it in place; use `source`/`fixture` copying otherwise.
+
 ## Ready image vs managed image
 
 Choose one of two Docker image modes.
@@ -121,6 +141,23 @@ harness-evals run --refresh-managed-image
 Refresh mode skips the cached-image reuse path, builds with Docker `--pull` and `--no-cache`, runs probes after the build, and records `cacheHit: false` in `image-resolution.json`. The flag does not rebuild or mutate a user-supplied ready image.
 
 You do not need a separate Docker build step in your project config.
+
+#### Customize the managed base: `docker.baseImage` and `docker.baseSetup`
+
+By default the managed build starts from an internal base image. You can override it:
+
+```yaml
+docker:
+  baseImage: public.ecr.aws/acme/task-image:latest   # build the agent CLI on top of this
+  baseSetup:                                          # run before adapter recipes
+    - "command -v node >/dev/null 2>&1 || (apt-get update && apt-get install -y nodejs) || true"
+    - "command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y python3) || true"
+```
+
+- `docker.baseImage` replaces the internal base for the managed build; the selected adapters' install recipes are layered on top. Ignored when `docker.image` (a ready image) is set.
+- A test case can set a per-case `image:`, which becomes that case's `docker.baseImage` — useful when each task ships its own prebuilt image but they share one project config.
+- `docker.baseSetup` is an ordered list of commands emitted as `RUN` lines after the base image and before any adapter recipe. Use it to guarantee runtimes (such as `node`/`python3`) exist on an arbitrary base, or to make paths writable for a non-root user.
+- `baseImage` and `baseSetup` are both part of the managed-image cache key, so changing either rebuilds. A per-case base image caches as its own managed image.
 
 ## Environment allowlists
 

@@ -16,6 +16,7 @@ Read `docs/index.md` first, then read the task or reference page relevant to the
 - `docs/concepts.md`
 - `docs/cli-reference.md`
 - `docs/writing-evals.md`
+- `docs/verifiers.md`
 - `docs/use-cases.md`
 - `docs/agents-and-adapters.md`
 - `docs/docker-workspaces-and-images.md`

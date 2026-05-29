@@ -1,4 +1,5 @@
-import { posix as posixPath } from 'node:path';
+import { posix as posixPath, resolve as resolvePath } from 'node:path';
+import type { ConfigMount } from '../adapters/types.js';
 import type { TestCaseVerifierConfig, WorkspaceConfig, DockerConfig, NetworkPolicyConfig } from '../config/schema.js';
 import { runInDocker } from '../docker/runner.js';
 import { readVerifierReward } from './reward.js';
@@ -11,6 +12,7 @@ export interface RunVerifierInput {
   configDir: string;
   workspace: WorkspaceConfig;
   docker: DockerConfig;
+  projectRoot: string;
   caseId: string;
   agentName: string;
 }
@@ -20,6 +22,7 @@ export async function runVerifier(input: RunVerifierInput): Promise<VerifierRunR
   const startedAtMs = Date.now();
   const argv = [input.verifier.command, ...(input.verifier.args ?? [])];
   const network = verifierNetworkPolicy(input.verifier.network);
+  const configMounts = verifierAssetMounts(input.verifier, input.projectRoot);
   const docker = await runInDocker({
     image: input.dockerImage,
     workspaceDir: input.workspaceDir,
@@ -30,7 +33,7 @@ export async function runVerifier(input: RunVerifierInput): Promise<VerifierRunR
     argv,
     workdir: verifierWorkdir(input.verifier, input.workspace),
     envNames: input.verifier.env ?? [],
-    configMounts: [],
+    configMounts,
     caseId: input.caseId,
     agentName: `${input.agentName}-verifier`,
     timeoutMs: input.verifier.timeoutMs ?? input.docker.timeoutMs,
@@ -83,6 +86,15 @@ export function verifierSetupError(message: string): VerifierRunResult {
     error: message,
     metadata: { setupError: message },
   };
+}
+
+function verifierAssetMounts(verifier: TestCaseVerifierConfig, projectRoot: string): ConfigMount[] {
+  if (!verifier.assetsDir) return [];
+  return [{
+    source: resolvePath(projectRoot, verifier.assetsDir),
+    target: verifier.assetsTarget ?? '/tests',
+    readonly: true,
+  }];
 }
 
 function verifierWorkdir(verifier: TestCaseVerifierConfig, workspace: WorkspaceConfig): string {

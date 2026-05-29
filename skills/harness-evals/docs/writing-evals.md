@@ -74,6 +74,7 @@ Supported top-level fields:
 - `id`: required, unique case id.
 - `description`: optional human-readable summary.
 - `suite`: optional label for `--suite` filtering.
+- `image`: optional per-case managed-build base image (becomes this case's `docker.baseImage`).
 - `workspace`: optional per-case workspace override.
 - `agents`: optional include/exclude/override selection.
 - `mocks`: optional case-level mock declarations.
@@ -142,7 +143,11 @@ Verifier fields:
 - `rewardFormat`: `auto`, `text`, or `json`. Text rewards are parsed as `{ reward: number }`; JSON rewards must be a numeric reward map.
 - `hiddenPatch`: optional project-relative patch applied after agent changes are captured and before the verifier runs.
 - `captureModelPatch`: writes `model.patch` before hidden tests are applied.
+- `assetsDir`: optional project-relative host directory mounted read-only into the **verifier container only** (not the agent steps). Use it to deliver hidden tests, fixtures, or scripts the verifier needs without exposing them to the agent.
+- `assetsTarget`: container mount path for `assetsDir` (default `/tests`).
 - `network`: verifier network policy. Omit it to run the verifier with `mode: none`.
+
+`assetsDir` is an alternative to `hiddenPatch` for delivering hidden grading material: instead of patching the workspace, it mounts a directory the verifier command can read (for example a `test.sh` and hidden test files). Because the mount is verifier-only and read-only, the agent never sees those files.
 
 When a verifier is configured, the run passes only if the agent steps pass and the verifier passes. A numeric reward of `0` fails the verifier; a positive reward passes it.
 
@@ -190,6 +195,18 @@ workspace:
 ```
 
 `workspace.fixture` is often the best choice for focused evals because each run starts from a stable snapshot.
+
+When the repo under test already lives inside the Docker image, seed the workspace from the image instead of copying a source:
+
+```yaml
+image: public.ecr.aws/acme/task-image:latest
+workspace:
+  seedFromImage: true
+  seedPath: /app          # default /app
+  containerPath: /app
+```
+
+This extracts `seedPath` (including `.git`) from the resolved image into the run workspace, so the agent edits the in-image repo in place and a separately-launched verifier sees those edits. See "Seed the workspace from the image" in the Docker workspaces doc.
 
 ## Assertion examples
 

@@ -24,13 +24,20 @@ The image resolver does not know provider-specific installation details. Adapter
 ```yaml
 docker:
   image: ghcr.io/acme/ready-agent-image:latest # optional ready image; bypasses managed builds
+  baseImage: public.ecr.aws/acme/task:latest   # optional managed-build base; overrides the internal default base
+  baseSetup:                                    # optional commands run after the base, before adapter recipes
+    - "command -v node >/dev/null || apt-get update && apt-get install -y nodejs"
 ```
+
+A test case may also carry a per-case `image`; the matrix merges it into that case's `docker.baseImage` so each case can build on its own base while sharing one project config.
 
 Rules:
 
-- `docker.image` means “use this ready image.” When set, managed image build is skipped.
+- `docker.image` means “use this ready image.” When set, managed image build is skipped (and `baseImage`/`baseSetup` are ignored).
 - If `docker.image` is absent, the harness uses managed-image mode.
-- Managed-image base image selection and local tag prefix are internal harness details, not user-facing YAML fields.
+- `docker.baseImage`, when set, replaces the internal default base for the managed build; the agent install recipe is layered on top of it. When absent, the internal base image is used.
+- `docker.baseSetup` is an ordered list of `RUN` commands emitted right after the base image and before any adapter recipe, so it can guarantee runtimes (for example `node`/`python3`) exist on an arbitrary base. It participates in the cache key.
+- The local tag prefix is an internal harness detail, not a user-facing YAML field.
 
 ### Image resolver contracts
 
@@ -39,6 +46,8 @@ type ImageMode = 'ready' | 'managed';
 
 interface DockerConfig {
   image?: string;
+  baseImage?: string; // managed-build base override; ignored when `image` is set
+  baseSetup?: string[]; // commands run after the base image, before adapter recipes
   repoPath: string;
   home: string;
   configRoot: string;
@@ -56,7 +65,8 @@ interface ImageResolutionInput {
 
 interface InstallManifest {
   schemaVersion: 1;
-  baseImage: string;
+  baseImage: string; // `docker.baseImage` when set, else the internal default base
+  baseSetup: string[]; // rendered as `RUN` lines before adapter recipes
   recipes: NormalizedInstallRecipe[];
 }
 
@@ -133,13 +143,14 @@ start
 Rules:
 
 1. Managed image tags are deterministic and use an internal harness tag prefix plus the cache key.
-2. The cache key includes the internal base image, harness image schema version, adapter names, adapter versions, agent names, recipe commands, recipe probes, and recipe `cacheKey` values.
+2. The cache key includes the resolved base image (`docker.baseImage` or the internal default), the `docker.baseSetup` commands, harness image schema version, adapter names, adapter versions, agent names, recipe commands, recipe probes, and recipe `cacheKey` values. A different per-case base image or `baseSetup` therefore caches as its own managed image.
 3. Adding a selected provider/adapter changes the install manifest when that provider/adapter has a recipe, producing a different cache key.
 4. If a cached managed image exists but required probes fail, the resolver rebuilds that image once for the same key.
 5. When refresh is requested, the resolver skips cached-image inspection and probe-before-build reuse, builds with Docker `--pull` and `--no-cache`, then reports `cacheHit: false`.
 6. Install commands run during image build and must not require runtime secrets.
-7. Mock wrapper runtime requirements are represented through adapter recipes or probes when the internal base image is insufficient.
-8. Probes run after build and before test-case execution.
+7. `docker.baseSetup` commands are rendered as `RUN` lines immediately after the `FROM <baseImage>` (and `WORKDIR`) lines and before any adapter recipe, so adapter installs can rely on the runtimes they set up.
+8. Mock wrapper runtime requirements are represented through adapter recipes or probes when the internal base image is insufficient.
+9. Probes run after build and before test-case execution.
 
 ## 4. Read Path / Write Path
 
@@ -169,6 +180,7 @@ Image resolution metadata record:
   "cacheHit": true,
   "manifest": {
     "baseImage": "oven/bun:1.2.10",
+    "baseSetup": [],
     "recipes": [
       { "adapter": "pi", "agentName": "pi-gemini", "cacheKey": "pi@1" }
     ]
@@ -205,7 +217,9 @@ Image resolution metadata record:
 ### Accepted decisions
 
 - `docker.image` represents a consumer-provided ready image.
-- Managed-image base image selection and tag prefix are internal harness details.
+- The managed-build base image defaults to an internal harness detail but can be overridden by `docker.baseImage` (or per-case `image`), so tasks that ship their own prebuilt image can have the agent CLI layered on top.
+- `docker.baseSetup` lets a project guarantee runtimes on an arbitrary base without owning the whole Dockerfile; it is part of the cache key so changing it rebuilds.
+- The managed-image tag prefix is an internal harness detail.
 - Managed image cache keys are derived from a normalized install manifest.
 - Adding a selected provider/adapter with a new install recipe invalidates the cache by changing the manifest key.
 - Ready images are probed but never rebuilt.

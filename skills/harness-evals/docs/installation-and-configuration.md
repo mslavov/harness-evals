@@ -105,8 +105,8 @@ Useful top-level sections:
 
 - `artifactRoot`: per-run artifacts
 - `outputRoot`: exported/latest reports
-- `workspace`: source copy settings
-- `docker`: runtime image, timeout, env allowlist
+- `workspace`: source copy / seed settings (`source`, `fixture`, or `seedFromImage`)
+- `docker`: runtime image (`image` ready / `baseImage` + `baseSetup` managed), timeout, env allowlist
 - `agents`: named agent configs
 - `tests`: project-relative globs for test case YAML files
 - `adapters`: project-defined adapter modules
@@ -149,6 +149,7 @@ docker:
   home: /home/harness
   configRoot: /agent-config
   timeoutMs: 300000
+  baseSetup: []
 mocks:
   root: evals/mocks
   strict: true

@@ -27,6 +27,7 @@ See [Use cases](./use-cases.md).
 ### I want to author or refine evals
 
 - [Writing evals](./writing-evals.md)
+- [Verifiers](./verifiers.md)
 - [Scoring and judging](./scoring-and-judging.md)
 - [Mocks](./mocks.md)
 
