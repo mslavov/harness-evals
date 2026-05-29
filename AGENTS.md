@@ -20,7 +20,7 @@ bd ready              # Find available work
 bd show <id>          # View issue details
 bd update <id> --claim  # Claim work atomically
 bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
+bd dolt push          # Sync beads data when explicitly asked
 ```
 
 ## Non-Interactive Shell Commands
@@ -71,26 +71,18 @@ bd close <id>         # Complete work
 
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
+**When ending a work session**, complete these steps. Leave code changes uncommitted and unpushed unless the user explicitly asks for a commit or push.
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+4. **Check git status** - Report changed files and whether they are staged, committed, or uncommitted
+5. **Hand off** - Provide concise context for the next session
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+**GIT WORKFLOW RULES:**
+- Work on `main` by default.
+- Do not create branches unless the user explicitly asks.
+- Do not commit or push unless the user explicitly asks.
+- When the user asks for a commit, commit only the requested changes after checking `git status`.
+- When the user asks for a push, pull/rebase as needed and push only the requested branch.
 <!-- END BEADS INTEGRATION -->
