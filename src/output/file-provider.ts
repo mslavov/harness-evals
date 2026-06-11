@@ -154,10 +154,11 @@ class FileOutputProvider implements OutputProvider {
         await writeJson(join(stepDir, 'command.redacted.json'), record.payload);
         break;
       case 'step.stdout':
-        await writeText(join(stepDir, 'stdout.log'), payloadText(record.payload));
+        // Streamed payloads reference an artifact the runner already wrote.
+        if (!isStreamedArtifactPayload(record.payload)) await writeText(join(stepDir, 'stdout.log'), payloadText(record.payload));
         break;
       case 'step.stderr':
-        await writeText(join(stepDir, 'stderr.log'), payloadText(record.payload));
+        if (!isStreamedArtifactPayload(record.payload)) await writeText(join(stepDir, 'stderr.log'), payloadText(record.payload));
         break;
       case 'step.events':
         await writeJson(join(stepDir, 'events-summary.json'), record.payload);
@@ -257,6 +258,10 @@ function isHarnessSummaryPayload(payload: unknown): payload is { pass: boolean; 
 
 function sanitizePathPart(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'artifact';
+}
+
+function isStreamedArtifactPayload(payload: unknown): boolean {
+  return isRecord(payload) && payload.streamed === true && typeof payload.file === 'string';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

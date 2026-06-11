@@ -162,6 +162,43 @@ test('codex exec injects a writable sandbox and skips the git-repo check by defa
   expect(plan.argv).toContain('--skip-git-repo-check');
 });
 
+test('codex exec defaults to --json events and outputFormat text opts out', async () => {
+  clearAuthEnv();
+  const root = await tempRoot();
+  const base = {
+    adapter: 'codex',
+    userConfigDirs: [join(root, 'missing-codex')],
+    useCurrentConfig: false,
+    config: { useCurrentConfig: false },
+  };
+
+  const jsonPlan = await codexAdapter.prepareStep(prepareInput(root, base));
+  expect(jsonPlan.argv).toContain('--json');
+  expect(jsonPlan.argv.filter((arg) => arg === '--json')).toHaveLength(1);
+
+  const textPlan = await codexAdapter.prepareStep(prepareInput(root, { ...base, outputFormat: 'text' }));
+  expect(textPlan.argv).not.toContain('--json');
+
+  const userFlagPlan = await codexAdapter.prepareStep(prepareInput(root, { ...base, args: ['--json'] }));
+  expect(userFlagPlan.argv.filter((arg) => arg === '--json')).toHaveLength(1);
+});
+
+test('claude-code defaults to json output and outputFormat text opts out', async () => {
+  clearAuthEnv();
+  const root = await tempRoot();
+  const base = {
+    adapter: 'claude-code',
+    useCurrentConfig: false,
+    config: { useCurrentConfig: false },
+  };
+
+  const jsonPlan = await claudeCodeAdapter.prepareStep(prepareInput(root, base));
+  expect(jsonPlan.argv[jsonPlan.argv.indexOf('--output-format') + 1]).toBe('json');
+
+  const textPlan = await claudeCodeAdapter.prepareStep(prepareInput(root, { ...base, outputFormat: 'text' }));
+  expect(textPlan.argv).not.toContain('--output-format');
+});
+
 test('codex exec respects a user-supplied sandbox flag', async () => {
   clearAuthEnv();
   const root = await tempRoot();

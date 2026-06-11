@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { loadHarnessConfig } from '../src/config/load.js';
 import { buildDockerArgs } from '../src/docker/args.js';
 import { piAdapter } from '../src/adapters/pi.js';
-import { redactionsFromValues, redactString } from '../src/redaction.js';
+import { claudeCodeAdapter } from '../src/adapters/claude-code.js';
+import { codexAdapter } from '../src/adapters/codex.js';
+import { redactFile, redactionsFromValues, redactString } from '../src/redaction.js';
 import { runAssertions } from '../src/assertions/builtins.js';
 import { copyWorkspace } from '../src/workspace/copy.js';
 import { snapshotWorkspace } from '../src/workspace/snapshot.js';
@@ -1018,6 +1020,183 @@ test('pi adapter parses JSONL events into tool calls and output', async () => {
 
   expect(summary.finalOutput).toBe('OK');
   expect(summary.toolCalls).toEqual([{ name: 'todo_write', args: { content: 'Run smoke eval' }, result: { ok: true }, isError: false }]);
+});
+
+test('pi adapter accumulates usage and cost from assistant message_end events', async () => {
+  const assistantMessage = (output: number, cost: number) => ({
+    role: 'assistant',
+    content: [{ type: 'text', text: 'done' }],
+    provider: 'openai-codex',
+    model: 'gpt-5.5',
+    usage: {
+      input: 100,
+      output,
+      cacheRead: 50,
+      cacheWrite: 0,
+      totalTokens: 150 + output,
+      cost: { input: 0.01, output: 0.02, total: cost },
+    },
+  });
+  const summary = await piAdapter.parseEvents({
+    stdout: [
+      JSON.stringify({ type: 'message_end', message: assistantMessage(20, 0.03) }),
+      JSON.stringify({ type: 'message_end', message: assistantMessage(30, 0.05) }),
+      // turn_end repeats the final assistant message and must not double-count usage.
+      JSON.stringify({ type: 'turn_end', message: assistantMessage(30, 0.05) }),
+    ].join('\n'),
+    stderr: '',
+  });
+
+  expect(summary.cost?.available).toBe(true);
+  expect(summary.cost?.totalCost).toBeCloseTo(0.08);
+  expect(summary.cost?.usage).toEqual([
+    expect.objectContaining({
+      provider: 'openai-codex',
+      model: 'gpt-5.5',
+      inputTokens: 200,
+      outputTokens: 50,
+      cachedInputTokens: 100,
+      totalTokens: 350,
+      requests: 2,
+      totalCost: expect.closeTo(0.08),
+      currency: 'USD',
+    }),
+  ]);
+});
+
+test('pi adapter streams events from the stdout artifact and caps giant tool results', async () => {
+  // Pi event streams can exceed V8 string limits; the runner streams them to
+  // disk and parseEvents must read the file without needing input.stdout.
+  const root = await tempRoot();
+  const stdoutPath = join(root, 'stdout.log');
+  const giantResult = 'x'.repeat(100_000);
+  await writeFile(stdoutPath, [
+    JSON.stringify({ type: 'tool_execution_start', toolCallId: '1', toolName: 'read', args: { path: 'big.txt' } }),
+    JSON.stringify({ type: 'tool_execution_end', toolCallId: '1', toolName: 'read', result: giantResult, isError: false }),
+    JSON.stringify({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'done' }],
+        provider: 'openai-codex',
+        model: 'gpt-5.5',
+        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0.01 } },
+      },
+    }),
+  ].join('\n'));
+
+  const summary = await piAdapter.parseEvents({ stdout: '', stderr: '', stdoutPath });
+
+  expect(summary.finalOutput).toBe('done');
+  expect(summary.cost?.totalCost).toBeCloseTo(0.01);
+  const result = summary.toolCalls[0]?.result;
+  expect(typeof result).toBe('string');
+  expect((result as string).length).toBeLessThan(5000);
+  expect(result as string).toEndWith('… [truncated]');
+});
+
+test('redactFile redacts secret values in a streamed artifact in place', async () => {
+  const root = await tempRoot();
+  const path = join(root, 'stdout.log');
+  await writeFile(path, 'line with sk-secret-token inside\nclean line\n');
+
+  await redactFile(path, redactionsFromValues([{ name: 'API_KEY', value: 'sk-secret-token' }]));
+
+  const content = await readFile(path, 'utf8');
+  expect(content).toBe('line with <redacted:API_KEY> inside\nclean line\n');
+});
+
+test('claude-code adapter parses json output into final output and cost', async () => {
+  // Shape captured from claude CLI 2.1.170 `claude -p --output-format json`.
+  const result = {
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: 'ok',
+    total_cost_usd: 0.0038763,
+    usage: { input_tokens: 451, cache_creation_input_tokens: 0, cache_read_input_tokens: 29853, output_tokens: 88 },
+    modelUsage: {
+      'claude-haiku-4-5-20251001': {
+        inputTokens: 451,
+        outputTokens: 88,
+        cacheReadInputTokens: 29853,
+        cacheCreationInputTokens: 0,
+        costUSD: 0.0038763,
+      },
+    },
+  };
+  const summary = await claudeCodeAdapter.parseEvents({
+    stdout: JSON.stringify(result, null, 2),
+    stderr: '',
+    plan: { argv: ['claude', '-p', 'prompt', '--output-format', 'json'] },
+  });
+
+  expect(summary.finalOutput).toBe('ok');
+  expect(summary.cost?.available).toBe(true);
+  expect(summary.cost?.totalCost).toBeCloseTo(0.0038763);
+  expect(summary.cost?.usage).toEqual([
+    expect.objectContaining({
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5-20251001',
+      inputTokens: 451,
+      outputTokens: 88,
+      cachedInputTokens: 29853,
+      totalTokens: 30392,
+      totalCost: expect.closeTo(0.0038763),
+    }),
+  ]);
+});
+
+test('claude-code adapter falls back to plain text without json output format', async () => {
+  const summary = await claudeCodeAdapter.parseEvents({
+    stdout: 'plain answer',
+    stderr: '',
+    plan: { argv: ['claude', '-p', 'prompt'] },
+  });
+  expect(summary.finalOutput).toBe('plain answer');
+  expect(summary.cost).toBeUndefined();
+});
+
+test('codex adapter parses --json events into final output and token usage', async () => {
+  const summary = await codexAdapter.parseEvents({
+    stdout: [
+      JSON.stringify({ type: 'thread.started', thread_id: 't1' }),
+      JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', command: 'ls' } }),
+      JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'All done.' } }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1200, cached_input_tokens: 800, output_tokens: 300 } }),
+    ].join('\n'),
+    stderr: '',
+    plan: { argv: ['codex', 'exec', '--model', 'gpt-5.5', '--json', 'prompt'] },
+  });
+
+  expect(summary.finalOutput).toBe('All done.');
+  expect(summary.cost?.available).toBe(true);
+  expect(summary.cost?.usage).toEqual([
+    expect.objectContaining({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      inputTokens: 1200,
+      cachedInputTokens: 800,
+      outputTokens: 300,
+      totalTokens: 1500,
+    }),
+  ]);
+});
+
+test('codex adapter falls back to cumulative token_count events', async () => {
+  const summary = await codexAdapter.parseEvents({
+    stdout: [
+      JSON.stringify({ id: '1', msg: { type: 'agent_message', message: 'Done.' } }),
+      JSON.stringify({ id: '2', msg: { type: 'token_count', info: { total_token_usage: { input_tokens: 50, cached_input_tokens: 10, output_tokens: 25, reasoning_output_tokens: 5 } } } }),
+    ].join('\n'),
+    stderr: '',
+    plan: { argv: ['codex', 'exec', '--json', 'prompt'] },
+  });
+
+  expect(summary.finalOutput).toBe('Done.');
+  expect(summary.cost?.usage).toEqual([
+    expect.objectContaining({ provider: 'openai', model: 'unknown', inputTokens: 50, outputTokens: 25, reasoningTokens: 5 }),
+  ]);
 });
 
 test('built-in assertions evaluate tool calls and workspace diff', async () => {

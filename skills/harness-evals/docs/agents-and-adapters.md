@@ -70,8 +70,24 @@ Adapter-specific fields used by built-ins:
 - `provider`, `providerEnv`, `model`, `modelEnv`: used by `pi`
 - `apiKeyEnv`: forwarded by built-ins that can authenticate with an API key
 - `profile`: used by `codex`
-- `outputFormat`: used by `claude-code` and `cursor`
+- `outputFormat`: used by `claude-code`, `codex`, and `cursor`
 - `config`: adapter-specific settings
+
+## Token and cost metrics
+
+`claude-code`, `codex`, and `pi` report per-run token usage (and cost where the CLI
+provides it) into the run's cost report, the HTML/CSV report columns, and `cost.json`
+artifacts. No configuration is needed:
+
+- `claude-code` defaults to `--output-format json` and reads `usage`/`modelUsage`/
+  `total_cost_usd` from the result object.
+- `codex` defaults to `codex exec --json` and sums token usage from the JSONL events
+  (tokens only; no dollar cost under ChatGPT auth).
+- `pi` accumulates usage and cost from its assistant message events.
+
+The json defaults apply only when the agent runs the real CLI binary; agents that
+override `command:` keep plain output. Set `outputFormat: text` to opt out (final
+output then stays raw stdout and no usage is reported).
 
 ## Reuse config with `extends`
 

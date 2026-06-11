@@ -4,8 +4,9 @@ import { access, chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from 'nod
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { expandTrustedPath, resolveProjectPath, resolveTrustedPath } from '../config/paths.js';
-import type { AgentEventsSummary, ToolCallSummary } from '../events/types.js';
-import { type AgentAdapter, type AgentCompletionInput, type AgentStepPrepareInput, type AgentStepRunPlan } from './types.js';
+import type { AgentEventsSummary, CostReport, ToolCallSummary, UsageReport } from '../events/types.js';
+import { stdoutLines } from './stdout-lines.js';
+import { type AgentAdapter, type AgentCompletionInput, type AgentEventInput, type AgentStepPrepareInput, type AgentStepRunPlan } from './types.js';
 
 interface PiSelection {
   provider?: string;
@@ -116,7 +117,7 @@ export const piAdapter: AgentAdapter = {
     };
   },
   async parseEvents(input) {
-    return parsePiEvents(input.stdout);
+    return parsePiEvents(input);
   },
 };
 
@@ -124,21 +125,28 @@ interface MutableToolCall extends ToolCallSummary {
   id?: string;
 }
 
-function parsePiEvents(stdout: string): AgentEventsSummary {
+async function parsePiEvents(input: Pick<AgentEventInput, 'stdout' | 'stdoutPath'>): Promise<AgentEventsSummary> {
   const errors: string[] = [];
   const toolCalls: MutableToolCall[] = [];
   const toolCallsById = new Map<string, MutableToolCall>();
+  const usageByModel = new Map<string, UsageReport>();
+  let costSeen = false;
   let finalOutput = '';
+  let index = 0;
+  let parseErrors = 0;
 
-  const lines = stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  for (const [index, line] of lines.entries()) {
+  for await (const rawLine of stdoutLines(input)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    index += 1;
     let event: Record<string, unknown>;
     try {
       const parsed = JSON.parse(line) as unknown;
       if (!isRecord(parsed)) continue;
       event = parsed;
     } catch (error) {
-      errors.push(`Line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+      parseErrors += 1;
+      if (parseErrors <= MAX_PARSE_ERRORS) errors.push(`Line ${index}: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
 
@@ -156,7 +164,7 @@ function parsePiEvents(stdout: string): AgentEventsSummary {
       const id = typeof event.toolCallId === 'string' ? event.toolCallId : undefined;
       const name = typeof event.toolName === 'string' ? event.toolName : 'unknown';
       const call = (id ? toolCallsById.get(id) : undefined) ?? createToolCall(toolCalls, toolCallsById, id, name);
-      call.result = event.result;
+      call.result = capToolResult(event.result);
       call.isError = Boolean(event.isError);
       if (call.isError) errors.push(`Tool ${name} failed`);
       continue;
@@ -167,6 +175,9 @@ function parsePiEvents(stdout: string): AgentEventsSummary {
       if (message?.role === 'assistant') {
         finalOutput = extractMessageText(message);
         collectMessageError(message, errors);
+        // Usage is accumulated from message_end only: turn_end repeats the turn's
+        // final assistant message and would double-count it.
+        if (type === 'message_end' && accumulateMessageUsage(message, usageByModel)) costSeen = true;
       }
       continue;
     }
@@ -183,7 +194,8 @@ function parsePiEvents(stdout: string): AgentEventsSummary {
   }
 
   if (!finalOutput) {
-    const genericJson = parseJsonl(stdout);
+    // Heuristic fallback for non-pi JSONL; the in-memory tail is enough here.
+    const genericJson = parseJsonl(input.stdout);
     const final = [...genericJson].reverse().find((event) => typeof event.output === 'string' || typeof event.text === 'string');
     finalOutput = typeof final?.output === 'string' ? final.output : typeof final?.text === 'string' ? final.text : '';
   }
@@ -192,7 +204,78 @@ function parsePiEvents(stdout: string): AgentEventsSummary {
     finalOutput,
     toolCalls: toolCalls.map(({ id: _id, ...call }) => call),
     errors,
+    cost: piCostReport(usageByModel, costSeen),
   };
+}
+
+const MAX_PARSE_ERRORS = 50;
+const TOOL_RESULT_PREVIEW_CHARS = 4096;
+
+// Tool results can embed whole files; retaining them across hundreds of calls
+// (and serializing them into events-summary/result artifacts) balloons memory.
+function capToolResult(result: unknown): unknown {
+  if (typeof result === 'string') {
+    return result.length > TOOL_RESULT_PREVIEW_CHARS ? `${result.slice(0, TOOL_RESULT_PREVIEW_CHARS)}… [truncated]` : result;
+  }
+  if (result && typeof result === 'object') {
+    try {
+      const serialized = JSON.stringify(result);
+      if (serialized && serialized.length > TOOL_RESULT_PREVIEW_CHARS) {
+        return `${serialized.slice(0, TOOL_RESULT_PREVIEW_CHARS)}… [truncated]`;
+      }
+    } catch {
+      return '[unserializable tool result]';
+    }
+  }
+  return result;
+}
+
+// Assistant message_end events carry per-message usage:
+// { input, output, cacheRead, cacheWrite, totalTokens, cost: { total, ... } }.
+function accumulateMessageUsage(message: Record<string, unknown>, usageByModel: Map<string, UsageReport>): boolean {
+  const usage = isRecord(message.usage) ? message.usage : undefined;
+  if (!usage) return false;
+  const provider = typeof message.provider === 'string' ? message.provider : 'pi';
+  const model = typeof message.model === 'string' ? message.model : 'unknown';
+  const key = `${provider} ${model}`;
+  const entry = usageByModel.get(key) ?? { provider, model, requests: 0 };
+  entry.inputTokens = (entry.inputTokens ?? 0) + numberOrZeroPi(usage.input);
+  entry.outputTokens = (entry.outputTokens ?? 0) + numberOrZeroPi(usage.output);
+  entry.cachedInputTokens = (entry.cachedInputTokens ?? 0) + numberOrZeroPi(usage.cacheRead);
+  entry.totalTokens = (entry.totalTokens ?? 0)
+    + (numberOrUndefinedPi(usage.totalTokens)
+      ?? numberOrZeroPi(usage.input) + numberOrZeroPi(usage.output) + numberOrZeroPi(usage.cacheRead) + numberOrZeroPi(usage.cacheWrite));
+  entry.requests = (entry.requests ?? 0) + 1;
+  const cost = isRecord(usage.cost) ? numberOrUndefinedPi(usage.cost.total) : undefined;
+  if (cost !== undefined) {
+    entry.totalCost = (entry.totalCost ?? 0) + cost;
+    entry.currency = 'USD';
+  }
+  usageByModel.set(key, entry);
+  return true;
+}
+
+function piCostReport(usageByModel: Map<string, UsageReport>, costSeen: boolean): CostReport | undefined {
+  if (!costSeen || usageByModel.size === 0) return undefined;
+  const usage = [...usageByModel.values()];
+  const totalCost = usage.reduce<number | undefined>(
+    (total, entry) => (entry.totalCost === undefined ? total : (total ?? 0) + entry.totalCost),
+    undefined,
+  );
+  return {
+    available: true,
+    currency: totalCost === undefined ? undefined : 'USD',
+    totalCost,
+    usage,
+  };
+}
+
+function numberOrZeroPi(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function numberOrUndefinedPi(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function parseJsonl(input: string): Array<Record<string, unknown>> {

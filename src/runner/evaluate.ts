@@ -11,7 +11,7 @@ import type { CostSummary } from '../cost/types.js';
 import { ImageResolutionError, resolveDockerImage, type ImageResolutionAgent, type ImageResolutionResult } from '../docker/image-resolver.js';
 import { runInDocker } from '../docker/runner.js';
 import { seedWorkspaceFromImage } from '../docker/seed.js';
-import { redactJson, redactionsFromEnv, type Redaction } from '../redaction.js';
+import { redactFile, redactJson, redactionsFromEnv, type Redaction } from '../redaction.js';
 import { copyWorkspace } from '../workspace/copy.js';
 import { diffWorkspace } from '../workspace/diff.js';
 import { snapshotWorkspace, type WorkspaceSnapshot } from '../workspace/snapshot.js';
@@ -421,15 +421,20 @@ async function executeScenarioStep(input: ExecuteScenarioStepInput): Promise<Exe
       caseId: input.entry.testCase.id,
       agentName: input.entry.agentName,
       timeoutMs,
+      stdoutFile: join(stepDir, 'stdout.log'),
+      stderrFile: join(stepDir, 'stderr.log'),
     });
     stdout = docker.stdout;
     stderr = docker.stderr;
+    // The runner streams raw output; redact the artifacts before anything reads them.
+    await redactFile(docker.stdoutPath, input.redactions);
+    await redactFile(docker.stderrPath, input.redactions);
 
     await input.dispatcher.emit({ type: 'step.command', stepId, payload: docker.commandMetadata });
     commandEmitted = true;
-    await input.dispatcher.emit({ type: 'step.stdout', stepId, payload: stdout });
+    await input.dispatcher.emit({ type: 'step.stdout', stepId, payload: streamPayload(docker, 'stdout', stdout) });
     stdoutEmitted = true;
-    await input.dispatcher.emit({ type: 'step.stderr', stepId, payload: stderr });
+    await input.dispatcher.emit({ type: 'step.stderr', stepId, payload: streamPayload(docker, 'stderr', stderr) });
     stderrEmitted = true;
 
     mockCalls = await readMockCallLogs(mocks);
@@ -437,7 +442,13 @@ async function executeScenarioStep(input: ExecuteScenarioStepInput): Promise<Exe
     mockCallsEmitted = true;
     const unmatchedStrictMocks = strictMockFailures(mockCalls);
 
-    const events = await input.adapter.parseEvents({ stdout, stderr, plan });
+    const events = await input.adapter.parseEvents({
+      stdout,
+      stderr,
+      plan,
+      stdoutPath: docker.stdoutPath,
+      stdoutTruncated: docker.stdoutTruncated,
+    });
     const mockCallSummaries = summarizeMockCallRecords(mockCalls);
     if (mockCallSummaries.length > 0) events.mockCalls = mockCallSummaries;
     if (docker.errorMessage) events.errors.push(docker.errorMessage);
@@ -547,8 +558,8 @@ async function executeScenarioStep(input: ExecuteScenarioStepInput): Promise<Exe
     const completedAt = new Date().toISOString();
     const events: ScenarioStepResult['events'] = { finalOutput: output, toolCalls: [], errors: [message] };
     if (!commandEmitted && docker) await input.dispatcher.emit({ type: 'step.command', stepId, payload: docker.commandMetadata });
-    if (!stdoutEmitted) await input.dispatcher.emit({ type: 'step.stdout', stepId, payload: stdout });
-    if (!stderrEmitted) await input.dispatcher.emit({ type: 'step.stderr', stepId, payload: stderr || message });
+    if (!stdoutEmitted) await input.dispatcher.emit({ type: 'step.stdout', stepId, payload: streamPayload(docker, 'stdout', stdout) });
+    if (!stderrEmitted) await input.dispatcher.emit({ type: 'step.stderr', stepId, payload: streamPayload(docker, 'stderr', stderr || message) });
     if (!mockCallsEmitted) {
       try {
         mockCalls = await readMockCallLogs(mocks);
@@ -784,6 +795,24 @@ function buildStepMetadata(input: {
     },
     workspace: input.workspace,
   }, input.redactions) as Record<string, unknown>;
+}
+
+// When the runner streamed the output to its artifact file, emit a small
+// reference instead of the (possibly huge, possibly truncated) string — the
+// file provider then leaves the already-written artifact in place.
+function streamPayload(
+  docker: Awaited<ReturnType<typeof runInDocker>> | undefined,
+  kind: 'stdout' | 'stderr',
+  fallback: string,
+): unknown {
+  const path = kind === 'stdout' ? docker?.stdoutPath : docker?.stderrPath;
+  if (!docker || !path) return fallback;
+  return {
+    streamed: true,
+    file: `${kind}.log`,
+    bytes: kind === 'stdout' ? docker.stdoutBytes : docker.stderrBytes,
+    truncated: kind === 'stdout' ? docker.stdoutTruncated : docker.stderrTruncated,
+  };
 }
 
 function buildStepCompletedPayload(result: ScenarioStepResult): Record<string, unknown> {

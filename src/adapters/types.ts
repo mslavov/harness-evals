@@ -92,9 +92,13 @@ export interface ApplyMcpMocksResult {
 }
 
 export interface AgentEventInput {
+  /** In-memory copy of the stream; only the tail when `stdoutTruncated` is set. */
   stdout: string;
   stderr: string;
   plan: AgentStepRunPlan;
+  /** Full stdout artifact on disk when the runner streamed it (may exceed string limits — read line-wise). */
+  stdoutPath?: string;
+  stdoutTruncated?: boolean;
 }
 
 export interface AdapterInstallRecipe {
