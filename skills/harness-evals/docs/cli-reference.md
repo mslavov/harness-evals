@@ -62,31 +62,37 @@ Output includes:
 
 ### `view`
 
-Locate or serve rendered reports.
+Generate and open the aggregate workspace report, or locate single-run reports.
 
 ```bash
-harness-evals view [--config path] [--run id] [--latest] [--open] [--port n]
+harness-evals view [--config path] [--batch id|latest|all] [--agents a,b] [--suite name] [--status s1,s2] [--no-open] [--port n]
+harness-evals view --run id | --latest [--open] [--port n]
 ```
 
 Flags:
 
-- `--run <id>`: target a specific run directory under the artifact root.
-- `--latest`: accepted by the CLI; current behavior already defaults to the latest report when `--run` is not set.
-- `--open`: open the file path or local server URL.
-- `--port <n>`: start a local HTTP server on `127.0.0.1:<n>` instead of just printing the file path.
+- `--batch <id|latest|all>`: pre-select batches in the report (comma list allowed). Default: newest batch.
+- `--agents`, `--suite`, `--status`: pre-set the report's filters.
+- `--no-open`: write and print the report path without opening a browser.
+- `--run <id>`: target a specific run directory under the artifact root (back-compat detail view).
+- `--latest`: target the last invocation's `results.html`.
+- `--open`: open the file path or local server URL (aggregate view opens by default).
+- `--port <n>`: serve reports on `127.0.0.1:<n>` instead of just printing the file path.
 
 Behavior:
 
+- Default: scans every run directory, writes `<outputRoot>/report/index.html` (self-contained interactive aggregate: batch selector, filters, charts), and opens it.
 - With `--run`, resolves `<artifactRoot>/<run-id>/index.html`.
-- Without `--run`, resolves `<outputRoot>/latest/results.html`.
-- With `--port`, serves `/runs/...` and `/latest/...` report assets until interrupted.
+- With `--latest`, resolves `<outputRoot>/latest/results.html`.
+- With `--port`, serves `/report/...`, `/runs/...`, and `/latest/...` until interrupted.
 
 ### `export`
 
-Copy or render a report to a specific output file.
+Export the aggregate report (filtered server-side), or copy/render legacy reports.
 
 ```bash
-harness-evals export [--config path] [--run id] --format html|json|csv --output path
+harness-evals export [--config path] --format html|json|csv --output path [--batch id|latest|all] [--agents a,b] [--suite name] [--case id] [--status s1,s2]
+harness-evals export --run id | --latest --format html|json|csv --output path
 ```
 
 Required flags:
@@ -96,12 +102,14 @@ Required flags:
 
 Optional flags:
 
-- `--run <id>`: export a specific historical run.
+- `--batch <id|latest|all>`: which batches to include (default `latest`); merging several keeps the newest graded attempt per (case, agent).
+- `--agents`, `--suite`, `--case`, `--status`: server-side row filters.
+- `--latest`: copy `<outputRoot>/latest/results.<format>` verbatim (pre-aggregate behavior).
+- `--run <id>`: export a specific historical run from its `result.json`.
 
 Behavior:
 
-- Without `--run`, copies `<outputRoot>/latest/results.<format>`.
-- With `--run`, reads `<artifactRoot>/<run-id>/result.json` and renders the requested format.
+- Default renders the aggregate: `html` is the interactive report, `csv` one row per task run, `json` the embedded data model.
 - Creates parent directories for `--output` automatically.
 - Fails if visualization is disabled or the requested format is not enabled in config.
 

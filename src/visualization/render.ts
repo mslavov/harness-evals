@@ -1,4 +1,5 @@
 import type { RunReport, TestCaseAgentReportCell, VisualizationFormat } from './types.js';
+import { FONTS_LINK, THEME_TOKENS } from './aggregate/styles.js';
 
 export function renderReport(report: RunReport, format: VisualizationFormat): string {
   if (format === 'json') return `${JSON.stringify(report, null, 2)}\n`;
@@ -15,8 +16,10 @@ export function renderHtml(report: RunReport): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harness Evals Results</title>
+${FONTS_LINK}
 <style>
-body{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:24px;color:#111827;background:#f9fafb}a{color:#2563eb}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0}.card{background:white;border:1px solid #e5e7eb;border-radius:10px;padding:12px}.card b{display:block;font-size:24px}.controls{margin:16px 0;display:flex;gap:8px;flex-wrap:wrap}button{border:1px solid #d1d5db;background:white;border-radius:999px;padding:6px 10px}table{border-collapse:collapse;width:100%;background:white}th,td{border:1px solid #e5e7eb;vertical-align:top;padding:10px}thead th{position:sticky;top:0;background:#f3f4f6}.status{display:inline-block;border-radius:999px;padding:2px 8px;font-weight:700}.passed{background:#dcfce7;color:#166534}.failed{background:#fee2e2;color:#991b1b}.error{background:#ffedd5;color:#9a3412}.skipped,.incomplete{background:#e5e7eb;color:#374151}details{margin-top:8px}pre{white-space:pre-wrap;word-break:break-word;background:#111827;color:#f9fafb;padding:8px;border-radius:8px;max-height:320px;overflow:auto}.meta{color:#4b5563;font-size:12px}.fail{color:#b91c1c}.ok{color:#166534}ul{padding-left:18px}
+${THEME_TOKENS}
+body{font-family:var(--sans);margin:24px;color:var(--ink);background:var(--paper)}a{color:var(--muted)}h1{font:400 1.75rem var(--serif);margin:0 0 4px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0}.card{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:12px}.card b{display:block;font:500 24px var(--mono)}.controls{margin:16px 0;display:flex;gap:8px;flex-wrap:wrap}button{border:1px solid var(--rule-solid);background:var(--card);color:var(--ink);border-radius:6px;padding:6px 10px;font:400 12px var(--sans);cursor:pointer}table{border-collapse:collapse;width:100%;background:var(--card)}th,td{border:1px solid var(--rule);vertical-align:top;padding:10px;font-size:13px}thead th{position:sticky;top:0;background:var(--paper-2);font:500 10px var(--mono);letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)}.status{display:inline-block;border-radius:4px;padding:2px 8px;font:500 11px var(--mono)}.passed{background:var(--pass-tint);color:var(--pass)}.failed{background:var(--accent-tint);color:var(--accent)}.error{background:var(--accent-tint);color:var(--accent)}.skipped,.incomplete{background:var(--paper-2);color:var(--muted)}details{margin-top:8px}pre{white-space:pre-wrap;word-break:break-word;background:var(--ink);color:var(--paper);padding:8px;border-radius:6px;max-height:320px;overflow:auto;font:400 11px var(--mono)}.meta{color:var(--soft);font:400 11px var(--mono)}.fail{color:var(--accent)}.ok{color:var(--pass)}ul{padding-left:18px}
 </style>
 <script>
 function filterRows(kind){for(const tr of document.querySelectorAll('tbody tr')){tr.style.display=kind==='all'||tr.dataset.statuses.includes(kind)?'':'none'}}

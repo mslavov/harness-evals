@@ -778,7 +778,9 @@ visualization:
 `);
   await writeFile(join(outputRoot, 'results.json'), '{"status":"passed"}\n');
 
-  const jsonExport = Bun.spawnSync(['bun', cliPath, 'export', '--config', join(root, 'harness-evals.yaml'), '--format', 'json', '--output', exported], { cwd: root });
+  // --latest preserves the copy-the-prerendered-summary behavior (the default
+  // export is now the workspace aggregate).
+  const jsonExport = Bun.spawnSync(['bun', cliPath, 'export', '--latest', '--config', join(root, 'harness-evals.yaml'), '--format', 'json', '--output', exported], { cwd: root });
   expect(jsonExport.exitCode).toBe(0);
   expect(await readFile(exported, 'utf8')).toBe('{"status":"passed"}\n');
 

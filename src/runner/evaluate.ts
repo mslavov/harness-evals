@@ -28,12 +28,15 @@ import { applyHiddenPatch, captureModelPatch } from '../verifier/patch.js';
 import { runVerifier, verifierSetupError } from '../verifier/run.js';
 import { shouldCaptureModelPatch, type HiddenPatchResult, type ModelPatchArtifact, type VerifierRunResult } from '../verifier/types.js';
 import { buildRunDir } from './artifacts.js';
+import { createBatchInfo, type BatchInfo } from './batch.js';
 import { buildMatrix } from './matrix.js';
 import type { HarnessRunResult, PassAtKSummary, ScenarioRunContext, ScenarioRunStatus, ScenarioStepResult, ScenarioStepStatus, TestRunResult } from './result.js';
 
 export interface RunHarnessOptions extends LoadHarnessConfigOptions, CliOverrides {
   adapters?: AgentAdapter[];
   judgeRunner?: JudgeRunner;
+  /** CLI argv (flags only) recorded as batch metadata for report grouping. */
+  cliArgs?: string[];
 }
 
 export async function runHarness(options: RunHarnessOptions = {}): Promise<HarnessRunResult> {
@@ -64,6 +67,12 @@ export async function runHarness(options: RunHarnessOptions = {}): Promise<Harne
     }
     : undefined;
   const judgeRunner = options.judgeRunner ?? createConfiguredJudgeRunner({ config, registry });
+  const batch = createBatchInfo({
+    argv: options.cliArgs,
+    agents: unique(matrix.map((entry) => entry.agentName)),
+    caseCount: new Set(matrix.map((entry) => entry.testCase.id)).size,
+    runCount: matrix.length,
+  });
   const results = await mapConcurrent(matrix, concurrency, (entry) => runTestCase(
     config,
     entry,
@@ -73,10 +82,11 @@ export async function runHarness(options: RunHarnessOptions = {}): Promise<Harne
     judgeRunner,
     options.refreshManagedImage,
     resolveSharedImage,
+    batch,
   ));
   const cost = buildHarnessCostSummary(results);
   const passAtK = buildPassAtKSummary(results);
-  const outputPath = await writeHarnessSummary(config, outputRegistry, registry, matrix, results, cost, passAtK);
+  const outputPath = await writeHarnessSummary(config, outputRegistry, registry, matrix, results, cost, passAtK, batch);
 
   return {
     pass: results.every((result) => result.pass),
@@ -96,6 +106,7 @@ export async function runTestCase(
   judgeRunner?: JudgeRunner,
   refreshManagedImage?: boolean,
   resolveImage?: () => Promise<ImageResolutionResult>,
+  batch?: BatchInfo,
 ): Promise<TestRunResult> {
   const runDir = buildRunDir(config.artifactRoot, entry.testCase.id, entry.agentName);
   const runId = basename(runDir);
@@ -105,6 +116,9 @@ export async function runTestCase(
   const steps: ScenarioStepResult[] = [];
   let redactions: Redaction[] = [];
   const runStartedAt = Date.now();
+  // Programmatic single-case callers don't pass a batch — every run dir still
+  // gets a real batchId so reports can always group it.
+  const activeBatch = batch ?? createBatchInfo({ agents: [entry.agentName], caseCount: 1, runCount: 1 });
   let cleanupPaths: string[] = [];
   let dispatcher: OutputDispatcher | undefined;
   let currentStepId: string | undefined;
@@ -138,6 +152,7 @@ export async function runTestCase(
         attemptNumber: entry.attemptNumber,
         attempts: entry.attempts,
         runDir,
+        batch: activeBatch,
         testCase: {
           id: entry.testCase.id,
           description: entry.testCase.description,
@@ -278,14 +293,14 @@ export async function runTestCase(
     await dispatcher.emit({ type: 'run.result', payload: result });
     const runVisualization = runVisualizationReportPayload(config, result);
     if (runVisualization) await dispatcher.emit({ type: 'visualization.report', payload: runVisualization });
-    await dispatcher.emit({ type: 'run.summary', payload: buildRunSummary(result, dispatcher) });
+    await dispatcher.emit({ type: 'run.summary', payload: buildRunSummary(result, dispatcher, activeBatch) });
     await dispatcher.finalize({ status: outputStatusForRun(result.status) });
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const result = buildSetupErrorResult(entry, runId, runDir, steps, message, Date.now() - runStartedAt, redactions, config.scoring);
 
-    if (dispatcher) await persistErrorResult(config, dispatcher, result, currentStepId);
+    if (dispatcher) await persistErrorResult(config, dispatcher, result, currentStepId, activeBatch);
     return result;
   } finally {
     await Promise.all(cleanupPaths.map((path) => rm(path, { recursive: true, force: true })));
@@ -952,6 +967,8 @@ function buildTestRunResult(input: {
     caseId: input.entry.testCase.id,
     scenarioId: input.context.scenarioId,
     agentName: input.entry.agentName,
+    suite: input.entry.testCase.suite,
+    description: input.entry.testCase.description,
     runId: input.context.runId,
     attemptIndex: input.entry.attemptIndex,
     attemptNumber: input.entry.attemptNumber,
@@ -1041,6 +1058,8 @@ function buildSetupErrorResult(
     caseId: entry.testCase.id,
     scenarioId: entry.testCase.id,
     agentName: entry.agentName,
+    suite: entry.testCase.suite,
+    description: entry.testCase.description,
     runId,
     attemptIndex: entry.attemptIndex,
     attemptNumber: entry.attemptNumber,
@@ -1298,6 +1317,7 @@ async function writeHarnessSummary(
   results: TestRunResult[],
   cost: CostSummary,
   passAtK: PassAtKSummary[],
+  batch?: BatchInfo,
 ): Promise<string> {
   const runId = `summary-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   const redactions = redactionsFromEnv(unique(matrix.flatMap((entry) => runRedactionEnvNames(config, entry, registry))));
@@ -1315,6 +1335,7 @@ async function writeHarnessSummary(
       results,
       cost,
       passAtK,
+      batch,
       providerFailures: dispatcher.providerFailures,
     },
   });
@@ -1324,7 +1345,7 @@ async function writeHarnessSummary(
   return latestVisualization?.files.find((file) => file.format === 'json')?.path ?? join(config.outputRoot, 'latest', 'results.json');
 }
 
-async function persistErrorResult(config: LoadedHarnessConfig, dispatcher: OutputDispatcher, result: TestRunResult, stepId: string | undefined): Promise<void> {
+async function persistErrorResult(config: LoadedHarnessConfig, dispatcher: OutputDispatcher, result: TestRunResult, stepId: string | undefined, batch?: BatchInfo): Promise<void> {
   try {
     if (stepId) {
       await dispatcher.emit({
@@ -1345,7 +1366,7 @@ async function persistErrorResult(config: LoadedHarnessConfig, dispatcher: Outpu
     await dispatcher.emit({ type: 'run.result', payload: result });
     const runVisualization = runVisualizationReportPayload(config, result);
     if (runVisualization) await dispatcher.emit({ type: 'visualization.report', payload: runVisualization });
-    await dispatcher.emit({ type: 'run.summary', payload: buildRunSummary(result, dispatcher) });
+    await dispatcher.emit({ type: 'run.summary', payload: buildRunSummary(result, dispatcher, batch) });
     await dispatcher.finalize({ status: 'error' });
   } catch (outputError) {
     const outputMessage = outputError instanceof Error ? outputError.message : String(outputError);
@@ -1354,11 +1375,14 @@ async function persistErrorResult(config: LoadedHarnessConfig, dispatcher: Outpu
   }
 }
 
-function buildRunSummary(result: TestRunResult, dispatcher: OutputDispatcher): Record<string, unknown> {
+function buildRunSummary(result: TestRunResult, dispatcher: OutputDispatcher, batch?: BatchInfo): Record<string, unknown> {
   return {
     caseId: result.caseId,
     scenarioId: result.scenarioId,
     agentName: result.agentName,
+    batchId: batch?.batchId,
+    suite: result.suite,
+    description: result.description,
     attemptIndex: result.attemptIndex,
     attemptNumber: result.attemptNumber,
     attempts: result.attempts,

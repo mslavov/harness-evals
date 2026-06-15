@@ -116,39 +116,84 @@ visualization:
 
 These switches affect the rendered report content, not the underlying artifacts.
 
+## Aggregate report (default `view`)
+
+`harness-evals view` with no `--run`/`--latest` scans every run directory in
+the workspace and writes one self-contained interactive report to
+`<outputRoot>/report/index.html`, then opens it (suppress with `--no-open`).
+
+How it works:
+
+- Every `harness-evals run` invocation stamps a **batchId** into each run
+  directory it creates (`summary.json.batchId`, plus full metadata under
+  `run-started.json.batch`). The report's "Runs" selector lists batches
+  newest-first; the newest is pre-selected.
+- Selecting several batches merges them, keeping the **newest graded attempt**
+  per (case, agent): a passed/failed/skipped/timeout verdict always beats an
+  error/incomplete run, regardless of recency.
+- Runs from versions before batch stamping are grouped into synthetic
+  `legacy-<date>` batches derived from the run directory timestamp.
+- The scanner reads only `summary.json` and `run-started.json` (never the
+  potentially huge `result.json`). Corrupt or partial run dirs become scan
+  warnings; a dir with only `run-started.json` shows as `incomplete`.
+- All run data is embedded in the HTML, so batch/agent/suite/status filters
+  and a disagreements-only toggle re-aggregate live — the file works offline,
+  from `file://`, and survives being mailed around.
+
+The report shows per-agent KPI cards (solve rate with 95% Wilson interval,
+average time, total and per-task cost, tokens), solve-rate bars (overall and
+per suite), a cost-vs-solve-rate scatter, an agent × task matrix with
+pass/fail dots and in-cell cost/duration micro-bars (click a cell for attempt
+details and a link to the run's own report), duration and cost strip plots,
+and a cached/input/output token composition bar — all hand-rolled inline SVG,
+no external scripts.
+
+`summary.json` now also records `suite` and `description` per run, so suite
+grouping works without re-reading test configs.
+
 ## View reports
 
-Use the CLI to locate or serve reports:
-
 ```bash
-harness-evals view
-harness-evals view --run <run-id>
-harness-evals view --open
-harness-evals view --port 3000
+harness-evals view                       # aggregate report, opens browser
+harness-evals view --no-open             # just write + print the path
+harness-evals view --batch all           # pre-select every batch
+harness-evals view --run <run-id>        # one run's index.html (back-compat)
+harness-evals view --latest              # last invocation's results.html
+harness-evals view --port 3000           # serve /report, /runs, /latest
 ```
 
 Behavior:
 
-- without `--run`, `view` targets `output/latest/results.html`
+- default: regenerate `<outputRoot>/report/index.html` from a workspace scan
+  and open it; `--batch`, `--agents`, `--suite`, `--status` pre-set the
+  report's filters (all data stays embedded)
 - with `--run`, it targets `<artifactRoot>/<run-id>/index.html`
-- with `--port`, it serves `/latest/...` and `/runs/...` over a local HTTP server
-- with `--open`, it opens the resolved file or local URL
+- with `--latest`, it targets `output/latest/results.html`
+- with `--port`, it serves `/report/...`, `/latest/...` and `/runs/...` over a
+  local HTTP server (run links in the aggregate report resolve automatically)
 
-If the expected HTML file is missing, `view` fails with `Report not found: ...`.
+If an expected HTML file is missing, `view` fails with `Report not found: ...`.
 
 ## Export reports
 
-Use `export` to copy or render one report file:
-
 ```bash
-harness-evals export --format json --output report.json
-harness-evals export --run <run-id> --format csv --output report.csv
+harness-evals export --format csv --output report.csv                    # newest batch
+harness-evals export --batch all --format json --output everything.json  # whole workspace
+harness-evals export --batch b1,b2 --agents claude,pi --format html --output cmp.html
+harness-evals export --latest --format json --output report.json         # copy last summary
+harness-evals export --run <run-id> --format csv --output report.csv     # single run
 ```
 
 Behavior:
 
-- exporting latest copies `output/latest/results.<format>`
-- exporting a specific run reads `<artifactRoot>/<run-id>/result.json` and renders the requested format on demand
+- default exports the **aggregate**: scans the workspace, applies `--batch`
+  (default `latest`; `all` or a comma list also allowed), `--agents`,
+  `--suite`, `--case`, `--status` server-side; merging several batches
+  dedupes to the newest graded attempt per (case, agent). `html` stays
+  interactive; `csv` is one row per task run (batch, suite, models, status,
+  duration, cost, token split); `json` is the embedded data model.
+- `--latest` copies `output/latest/results.<format>` verbatim
+- `--run` reads `<artifactRoot>/<run-id>/result.json` and renders on demand
 
 `export` requires:
 

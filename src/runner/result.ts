@@ -48,6 +48,8 @@ export interface TestRunResult {
   caseId: string;
   scenarioId: string;
   agentName: string;
+  suite?: string;
+  description?: string;
   runId: string;
   attemptIndex: number;
   attemptNumber: number;

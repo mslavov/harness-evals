@@ -11,6 +11,10 @@ import type { CliOverrides } from './config/schema.js';
 import { buildRunReport } from './visualization/report.js';
 import { renderReport } from './visualization/render.js';
 import type { VisualizationFormat } from './visualization/types.js';
+import { dedupeNewestValid, filterTaskRuns, scanWorkspaceRuns, type CaseInfoMap, type WorkspaceScanResult } from './visualization/scan.js';
+import { buildAggregateData, type AggregateInitialState } from './visualization/aggregate/data.js';
+import { renderAggregateHtml } from './visualization/aggregate/render.js';
+import { renderAggregateCsv, renderAggregateJson } from './visualization/aggregate/csv.js';
 
 interface ParsedArgs extends CliOverrides {
   command: string;
@@ -18,9 +22,12 @@ interface ParsedArgs extends CliOverrides {
   runId?: string;
   latest?: boolean;
   open?: boolean;
+  noOpen?: boolean;
   port?: number;
   format?: VisualizationFormat;
   output?: string;
+  batch?: string;
+  statuses?: string[];
 }
 
 async function main(): Promise<void> {
@@ -62,6 +69,7 @@ async function main(): Promise<void> {
 
   const result = await runHarness({
     configPath: parsed.configPath,
+    cliArgs: process.argv.slice(2),
     agents: parsed.agents,
     caseId: parsed.caseId,
     suite: parsed.suite,
@@ -131,6 +139,15 @@ function parseArgs(argv: string[]): ParsedArgs {
       case '--open':
         parsed.open = true;
         break;
+      case '--no-open':
+        parsed.noOpen = true;
+        break;
+      case '--batch':
+        parsed.batch = readValue(argv, arg);
+        break;
+      case '--status':
+        parsed.statuses = readValue(argv, arg).split(',').map((value) => value.trim()).filter(Boolean);
+        break;
       case '--port':
         parsed.port = readPositiveInt(readValue(argv, arg), arg);
         break;
@@ -167,19 +184,74 @@ function readPositiveInt(value: string, flag: string): number {
 
 async function viewReport(parsed: ParsedArgs): Promise<void> {
   const config = await loadHarnessConfig({ configPath: parsed.configPath });
-  const reportPath = parsed.runId
-    ? join(config.artifactRoot, parsed.runId, 'index.html')
-    : join(config.outputRoot, 'latest', 'results.html');
-  if (!existsSync(reportPath)) throw new Error(`Report not found: ${reportPath}`);
 
-  if (parsed.port !== undefined) {
-    const urlPath = parsed.runId ? `/runs/${encodeURIComponent(parsed.runId)}/index.html` : '/latest/results.html';
-    await serveReports(config, parsed.port, urlPath, parsed.open ?? false);
+  // Back-compat detail views: a single run dir, or the last invocation's summary.
+  if (parsed.runId || parsed.latest) {
+    const reportPath = parsed.runId
+      ? join(config.artifactRoot, parsed.runId, 'index.html')
+      : join(config.outputRoot, 'latest', 'results.html');
+    if (!existsSync(reportPath)) throw new Error(`Report not found: ${reportPath}`);
+
+    if (parsed.port !== undefined) {
+      const urlPath = parsed.runId ? `/runs/${encodeURIComponent(parsed.runId)}/index.html` : '/latest/results.html';
+      await serveReports(config, parsed.port, urlPath, parsed.open ?? false);
+      return;
+    }
+
+    console.log(reportPath);
+    if (parsed.open) openPath(reportPath);
     return;
   }
 
+  // Default: aggregate report over every run in the workspace. The newest
+  // batch is pre-selected; all data is embedded so filters work client-side.
+  const reportPath = await writeAggregateReport(config, parsed);
+  if (parsed.port !== undefined) {
+    await serveReports(config, parsed.port, '/report/index.html', parsed.open ?? !parsed.noOpen);
+    return;
+  }
   console.log(reportPath);
-  if (parsed.open) openPath(reportPath);
+  if (!parsed.noOpen) openPath(reportPath);
+}
+
+async function writeAggregateReport(config: Awaited<ReturnType<typeof loadHarnessConfig>>, parsed: ParsedArgs): Promise<string> {
+  const scan = await scanAggregateRuns(config);
+  const reportDir = join(config.outputRoot, 'report');
+  const data = buildAggregateData({
+    scan,
+    workspace: config.projectRoot,
+    reportDir,
+    initialState: aggregateInitialState(parsed, scan),
+  });
+  await mkdir(reportDir, { recursive: true });
+  const reportPath = join(reportDir, 'index.html');
+  await writeFile(reportPath, renderAggregateHtml(data));
+  return reportPath;
+}
+
+async function scanAggregateRuns(config: Awaited<ReturnType<typeof loadHarnessConfig>>): Promise<WorkspaceScanResult> {
+  const caseInfo: CaseInfoMap = {};
+  for (const testCase of config.testCases) {
+    caseInfo[testCase.id] = { suite: testCase.suite, description: testCase.description };
+  }
+  return scanWorkspaceRuns({ artifactRoot: config.artifactRoot, caseInfo });
+}
+
+function aggregateInitialState(parsed: ParsedArgs, scan: WorkspaceScanResult): AggregateInitialState | undefined {
+  const state: AggregateInitialState = {};
+  const batchIds = resolveBatchIds(parsed.batch, scan);
+  if (batchIds) state.batchIds = batchIds;
+  if (parsed.agents?.length) state.agents = parsed.agents;
+  if (parsed.suite) state.suites = [parsed.suite];
+  if (parsed.statuses?.length) state.statuses = parsed.statuses;
+  return Object.keys(state).length > 0 ? state : undefined;
+}
+
+function resolveBatchIds(batch: string | undefined, scan: WorkspaceScanResult): string[] | undefined {
+  if (!batch) return undefined;
+  if (batch === 'latest') return scan.batches[0] ? [scan.batches[0].batchId] : undefined;
+  if (batch === 'all') return scan.batches.map((entry) => entry.batchId);
+  return batch.split(',').map((value) => value.trim()).filter(Boolean);
 }
 
 async function exportReport(parsed: ParsedArgs): Promise<void> {
@@ -192,7 +264,8 @@ async function exportReport(parsed: ParsedArgs): Promise<void> {
 
   await mkdir(dirname(output), { recursive: true });
 
-  if (!parsed.runId) {
+  // Back-compat: copy the last invocation's pre-rendered summary verbatim.
+  if (parsed.latest) {
     const latest = join(config.outputRoot, 'latest', `results.${parsed.format}`);
     if (!existsSync(latest)) throw new Error(`Report not found: ${latest}`);
     await copyFile(latest, output);
@@ -200,11 +273,46 @@ async function exportReport(parsed: ParsedArgs): Promise<void> {
     return;
   }
 
-  const resultPath = join(config.artifactRoot, parsed.runId, 'result.json');
-  if (!existsSync(resultPath)) throw new Error(`Run result not found: ${resultPath}`);
-  const result = JSON.parse(await readFile(resultPath, 'utf8')) as unknown;
-  const report = buildRunReport(result, { runId: parsed.runId, include: config.visualization.include });
-  await writeFile(output, renderReport(report, parsed.format));
+  if (parsed.runId) {
+    const resultPath = join(config.artifactRoot, parsed.runId, 'result.json');
+    if (!existsSync(resultPath)) throw new Error(`Run result not found: ${resultPath}`);
+    const result = JSON.parse(await readFile(resultPath, 'utf8')) as unknown;
+    const report = buildRunReport(result, { runId: parsed.runId, include: config.visualization.include });
+    await writeFile(output, renderReport(report, parsed.format));
+    console.log(output);
+    return;
+  }
+
+  // Default: aggregate export, filtered server-side. --batch defaults to the
+  // newest batch; merging several keeps the newest graded attempt per pair.
+  const scan = await scanAggregateRuns(config);
+  const batchIds = resolveBatchIds(parsed.batch ?? 'latest', scan);
+  // Always dedupe: within one batch it's a no-op, and legacy day-buckets can
+  // hold superseded attempts that would skew rates.
+  const runs = dedupeNewestValid(filterTaskRuns(scan.taskRuns, {
+    batchIds,
+    agents: parsed.agents,
+    suites: parsed.suite ? [parsed.suite] : undefined,
+    cases: parsed.caseId ? [parsed.caseId] : undefined,
+    statuses: parsed.statuses,
+  }));
+  const includedBatches = new Set(runs.map((run) => run.batchId));
+  const data = buildAggregateData({
+    scan: {
+      taskRuns: runs,
+      batches: scan.batches.filter((entry) => includedBatches.has(entry.batchId)),
+      warnings: scan.warnings,
+    },
+    workspace: config.projectRoot,
+    reportDir: dirname(output),
+    initialState: includedBatches.size > 0 ? { batchIds: [...includedBatches] } : undefined,
+  });
+  const content = parsed.format === 'html'
+    ? renderAggregateHtml(data)
+    : parsed.format === 'csv'
+      ? `${renderAggregateCsv(data.taskRuns)}\n`
+      : renderAggregateJson(data);
+  await writeFile(output, content);
   console.log(output);
 }
 
@@ -255,6 +363,7 @@ async function serveReports(config: Awaited<ReturnType<typeof loadHarnessConfig>
 function resolveStaticReportPath(config: Awaited<ReturnType<typeof loadHarnessConfig>>, pathname: string): string | undefined {
   const decoded = decodeURIComponent(pathname);
   if (decoded.startsWith('/latest/')) return safeJoin(join(config.outputRoot, 'latest'), decoded.slice('/latest/'.length));
+  if (decoded.startsWith('/report/')) return safeJoin(join(config.outputRoot, 'report'), decoded.slice('/report/'.length));
   if (decoded.startsWith('/runs/')) return safeJoin(config.artifactRoot, decoded.slice('/runs/'.length));
   return undefined;
 }
@@ -325,8 +434,18 @@ function printHelp(): void {
 Commands:
   harness-evals run [--config path] [--suite name] [--case id] [--agents a,b] [--concurrency n] [--attempts n]
   harness-evals list [--config path]
-  harness-evals view [--config path] [--run id] [--latest] [--open] [--port n]
-  harness-evals export [--config path] [--run id] --format html|json|csv --output path
+  harness-evals view [--config path] [--batch id|latest|all] [--agents a,b] [--suite name] [--status s1,s2] [--no-open] [--port n]
+  harness-evals view --run id | --latest [--open] [--port n]
+  harness-evals export [--config path] --format html|json|csv --output path [--batch id|latest|all] [--agents a,b] [--suite name] [--case id] [--status s1,s2]
+  harness-evals export --run id | --latest --format html|json|csv --output path
+
+View / export:
+  view (no --run/--latest) scans every run in the workspace into one
+  interactive report (newest batch pre-selected) and opens it; --no-open
+  suppresses the browser. export does the same aggregation server-side;
+  --batch defaults to latest, comma lists merge batches keeping the newest
+  graded attempt per (case, agent). --latest copies the last invocation's
+  pre-rendered summary; --run exports a single run directory.
 
 Run flags:
   --provider name     Override provider for selected agents
