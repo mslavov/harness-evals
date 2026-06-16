@@ -19,6 +19,7 @@ Read `docs/index.md` first, then read the task or reference page relevant to the
 - `docs/verifiers.md`
 - `docs/use-cases.md`
 - `docs/agents-and-adapters.md`
+- `docs/local-ollama-pi.md`
 - `docs/docker-workspaces-and-images.md`
 - `docs/mocks.md`
 - `docs/scoring-and-judging.md`

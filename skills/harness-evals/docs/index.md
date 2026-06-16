@@ -35,6 +35,7 @@ See [Use cases](./use-cases.md).
 
 - [Installation and configuration](./installation-and-configuration.md)
 - [Agents and adapters](./agents-and-adapters.md)
+- [Local Ollama models through Pi](./local-ollama-pi.md)
 - [Docker workspaces and images](./docker-workspaces-and-images.md)
 
 ### I want to inspect results

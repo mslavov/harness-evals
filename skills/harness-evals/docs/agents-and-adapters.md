@@ -196,6 +196,9 @@ Notes:
 - local paths referenced from Pi settings are rewritten to container repo paths when they stay inside the project; paths **outside** the repo (e.g. host-global skills/extensions/packages in `~/...`) are copied into the per-run config dir under `pi-resources/` and rewritten to their container path, then removed after the run.
 - Pi runs from the container workspace and sets `PI_CODING_AGENT_DIR` to the per-run config directory.
 
+For local Ollama models served from the host and used through Pi, see [Local Ollama models through Pi](./local-ollama-pi.md).
+
+
 ## Declare a project adapter
 
 Use `adapters` to load an adapter from your repo or from a package resolvable from the project.
