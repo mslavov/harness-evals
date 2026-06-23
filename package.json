@@ -1,6 +1,6 @@
 {
   "name": "harness-evals",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "bin": {
     "harness-evals": "dist/cli.js"
@@ -27,7 +27,9 @@
   "scripts": {
     "check": "tsc --noEmit",
     "build": "rm -rf dist && tsc",
-    "test": "bun test"
+    "test": "bun test",
+    "prepack": "bun run build",
+    "prepublishOnly": "bun run check && bun test"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.74.0",
