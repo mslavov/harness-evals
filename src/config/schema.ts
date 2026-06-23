@@ -253,6 +253,7 @@ export interface CliOverrides {
   timeoutMs?: number;
   dockerImage?: string;
   refreshManagedImage?: boolean;
+  cleanup?: boolean;
 }
 
 export interface MatrixEntry {

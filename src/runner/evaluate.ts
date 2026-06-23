@@ -67,6 +67,7 @@ export async function runHarness(options: RunHarnessOptions = {}): Promise<Harne
     }
     : undefined;
   const judgeRunner = options.judgeRunner ?? createConfiguredJudgeRunner({ config, registry });
+  const cleanup = cleanupEnabled(options.cleanup);
   const batch = createBatchInfo({
     argv: options.cliArgs,
     agents: unique(matrix.map((entry) => entry.agentName)),
@@ -83,6 +84,7 @@ export async function runHarness(options: RunHarnessOptions = {}): Promise<Harne
     options.refreshManagedImage,
     resolveSharedImage,
     batch,
+    cleanup,
   ));
   const cost = buildHarnessCostSummary(results);
   const passAtK = buildPassAtKSummary(results);
@@ -107,6 +109,7 @@ export async function runTestCase(
   refreshManagedImage?: boolean,
   resolveImage?: () => Promise<ImageResolutionResult>,
   batch?: BatchInfo,
+  cleanup = cleanupEnabled(),
 ): Promise<TestRunResult> {
   const runDir = buildRunDir(config.artifactRoot, entry.testCase.id, entry.agentName);
   const runId = basename(runDir);
@@ -303,8 +306,14 @@ export async function runTestCase(
     if (dispatcher) await persistErrorResult(config, dispatcher, result, currentStepId, activeBatch);
     return result;
   } finally {
-    await Promise.all(cleanupPaths.map((path) => rm(path, { recursive: true, force: true })));
+    if (cleanup) await Promise.all(cleanupPaths.map((path) => rm(path, { recursive: true, force: true })));
   }
+}
+
+function cleanupEnabled(value?: boolean): boolean {
+  if (value !== undefined) return value;
+  const env = process.env.HARNESS_EVALS_CLEANUP?.trim().toLowerCase();
+  return env === '1' || env === 'true' || env === 'yes' || env === 'on';
 }
 
 interface ExecuteScenarioStepInput {

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type AdapterContinuation, type AgentAdapter, type AgentStepPrepareInput } from '../src/adapters/types.js';
@@ -76,6 +76,43 @@ assert:
       output: 'OK from one step',
     });
   } finally {
+    restoreDocker();
+  }
+});
+
+test('adapter cleanup paths are kept by default and removed when cleanup is enabled', async () => {
+  const root = await tempRoot();
+  const restoreDocker = await installFakeDocker(root);
+  const cleanupPaths: string[] = [];
+  const previousCleanup = process.env.HARNESS_EVALS_CLEANUP;
+  delete process.env.HARNESS_EVALS_CLEANUP;
+
+  try {
+    await writeHarnessProject(root, `
+id: cleanup-paths
+prompt: cleanup
+config:
+  script: console.log('cleanup')
+assert: []
+`);
+
+    await runHarness({ cwd: root, adapters: [createCleanupAdapter(cleanupPaths)] });
+    expect(await pathExists(cleanupPaths[0])).toBe(true);
+
+    cleanupPaths.length = 0;
+    await runHarness({ cwd: root, adapters: [createCleanupAdapter(cleanupPaths)], cleanup: true });
+    expect(await pathExists(cleanupPaths[0])).toBe(false);
+
+    cleanupPaths.length = 0;
+    process.env.HARNESS_EVALS_CLEANUP = '1';
+    await runHarness({ cwd: root, adapters: [createCleanupAdapter(cleanupPaths)] });
+    expect(await pathExists(cleanupPaths[0])).toBe(false);
+  } finally {
+    if (previousCleanup === undefined) {
+      delete process.env.HARNESS_EVALS_CLEANUP;
+    } else {
+      process.env.HARNESS_EVALS_CLEANUP = previousCleanup;
+    }
     restoreDocker();
   }
 });
@@ -749,6 +786,33 @@ function createLifecycleAdapter(prepareCalls: PrepareCall[]): AgentAdapter {
   };
 }
 
+function createCleanupAdapter(cleanupPaths: string[]): AgentAdapter {
+  return {
+    name: 'lifecycle',
+    async prepareStep(input: AgentStepPrepareInput) {
+      const cleanupPath = join(input.configDir, `cleanup-${cleanupPaths.length}`);
+      await mkdir(cleanupPath, { recursive: true });
+      cleanupPaths.push(cleanupPath);
+
+      return {
+        argv: ['node', '-e', 'console.log("cleanup")'],
+        cwd: input.workspace.containerPath,
+        envNames: [],
+        configMounts: [],
+        parser: 'text',
+        cleanupPaths: [cleanupPath],
+      };
+    },
+    async parseEvents(input) {
+      return {
+        finalOutput: input.stdout.trim(),
+        toolCalls: [],
+        errors: input.stderr.trim() ? [input.stderr.trim()] : [],
+      };
+    },
+  };
+}
+
 function createScopedAdapter(prepareCalls: ScopedPrepareCall[]): AgentAdapter {
   return {
     name: 'scoped',
@@ -816,6 +880,15 @@ async function tempRoot(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), 'harness-evals-'));
   tempDirs.push(path);
   return path;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readRecord(value: unknown): Record<string, unknown> | undefined {

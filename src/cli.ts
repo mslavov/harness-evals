@@ -80,6 +80,7 @@ async function main(): Promise<void> {
     timeoutMs: parsed.timeoutMs,
     dockerImage: parsed.dockerImage,
     refreshManagedImage: parsed.refreshManagedImage,
+    cleanup: parsed.cleanup,
   });
 
   printResults(result.results);
@@ -129,6 +130,12 @@ function parseArgs(argv: string[]): ParsedArgs {
         break;
       case '--refresh-managed-image':
         parsed.refreshManagedImage = true;
+        break;
+      case '--cleanup':
+        parsed.cleanup = true;
+        break;
+      case '--no-cleanup':
+        parsed.cleanup = false;
         break;
       case '--run':
         parsed.runId = readValue(argv, arg);
@@ -454,6 +461,8 @@ Run flags:
   --timeout-ms n              Override per-run timeout
   --image ref                 Use a ready Docker image and skip managed builds
   --refresh-managed-image     Rebuild managed Docker image with --pull and --no-cache
+  --cleanup                   Delete adapter cleanup paths after each run (or set HARNESS_EVALS_CLEANUP=1)
+  --no-cleanup                Keep adapter cleanup paths after each run (default)
 `);
 }
 

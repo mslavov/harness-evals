@@ -30,12 +30,15 @@ Flags:
 - `--timeout-ms <n>`: override the per-run timeout.
 - `--image <ref>`: use a ready Docker image for all selected runs and skip managed image builds.
 - `--refresh-managed-image`: rebuild the selected managed image before running, using Docker `--pull` and `--no-cache`.
+- `--cleanup`: delete adapter cleanup paths after each run. You can also set `HARNESS_EVALS_CLEANUP=1`.
+- `--no-cleanup`: keep adapter cleanup paths after each run. This is the default.
 
 Output:
 
 - Prints one row per case/agent result, including artifact path.
 - Prints `Summary: <path>` for the harness summary output.
 - Exits with code `0` when all selected runs pass, `1` when any run fails or the command errors.
+- Keeps adapter cleanup paths unless `--cleanup` or `HARNESS_EVALS_CLEANUP=1` is set.
 
 ### `list`
 

@@ -125,7 +125,7 @@ If an agent uses `extends`, it does not need its own `adapter` as long as the pa
 
 Default behavior:
 
-- harness-evals copies a writable **snapshot** of your current config directory into `/agent-config/<adapter>` per run, sets the adapter-specific config env var to point at it, and deletes the copy after the run. A writable copy (not a read-only mount) lets the CLI refresh OAuth tokens and write session state without touching your host config.
+- harness-evals copies a writable **snapshot** of your current config directory into `/agent-config/<adapter>` per run and sets the adapter-specific config env var to point at it. A writable copy (not a read-only mount) lets the CLI refresh OAuth tokens and write session state without touching your host config. The copied config remains in the run artifact by default; pass `--cleanup` or set `HARNESS_EVALS_CLEANUP=1` to delete adapter cleanup paths after each run.
 - the config copy is **independent of credentials**: it happens even when an auth env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) is already set. The credential env is still forwarded and redacted.
 - noisy/large subdirectories (logs, sessions, caches, project history) are excluded by default to keep the snapshot small.
 
